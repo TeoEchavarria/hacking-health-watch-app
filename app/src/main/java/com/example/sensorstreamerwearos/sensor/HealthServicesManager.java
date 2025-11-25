@@ -10,11 +10,11 @@ import com.example.sensorstreamerwearos.model.SensorData;
 
 public class HealthServicesManager implements SensorEventListener {
     private static final String TAG = "HealthServicesManager";
-    private static final long SEND_INTERVAL_MS = 1000; // Send data every 1 second
+    private static final long SAMPLE_INTERVAL_MS = 1000; // Collect 1 sample per second
     private SensorManager sensorManager;
     private Sensor accelerometer;
     private SensorDataListener listener;
-    private long lastSendTime = 0;
+    private long lastSampleTime = 0;
 
     public interface SensorDataListener {
         void onSensorData(SensorData data);
@@ -43,8 +43,9 @@ public class HealthServicesManager implements SensorEventListener {
         }
 
         Log.d(TAG, "Starting Accelerometer monitoring");
-        // SENSOR_DELAY_NORMAL = ~200ms, SENSOR_DELAY_GAME = ~20ms, SENSOR_DELAY_FASTEST = as fast as possible
-        sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME);
+        // SENSOR_DELAY_NORMAL = ~200ms (~5Hz), SENSOR_DELAY_GAME = ~20ms (~50Hz)
+        // Using NORMAL for battery efficiency - still gives us ~5 samples/second
+        sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
     }
 
     public void stopAccelerometerMonitoring() {
@@ -59,19 +60,17 @@ public class HealthServicesManager implements SensorEventListener {
         if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
             long currentTime = System.currentTimeMillis();
             
-            // Only send data every SEND_INTERVAL_MS (1 second)
-            if (currentTime - lastSendTime >= SEND_INTERVAL_MS) {
+            // Only collect 1 sample per second for batching
+            if (currentTime - lastSampleTime >= SAMPLE_INTERVAL_MS) {
                 float x = event.values[0];
                 float y = event.values[1];
                 float z = event.values[2];
-                
-                Log.d(TAG, String.format("Accel: X=%.2f Y=%.2f Z=%.2f", x, y, z));
                 
                 if (listener != null) {
                     listener.onSensorData(new SensorData(currentTime, "accel", new float[]{x, y, z}));
                 }
                 
-                lastSendTime = currentTime;
+                lastSampleTime = currentTime;
             }
         }
     }
