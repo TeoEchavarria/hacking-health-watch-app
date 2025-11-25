@@ -5,55 +5,27 @@
     android:id="@+id/boxInsetLayout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/background_primary"
     tools:context=".MainActivity"
     tools:deviceIds="wear">
 
+    <!-- Large circular toggle button -->
     <Button
-        android:id="@+id/StartStreaming"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Start streaming"
-        app:layout_constraintBottom_toTopOf="@+id/StopStreaming"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_bias="1.0" />
-
-    <Button
-        android:id="@+id/StopStreaming"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="48dp"
-        android:text="Stop streaming"
+        android:id="@+id/toggleButton"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_margin="32dp"
+        android:background="@drawable/button_start"
+        android:text="Start"
+        android:textColor="@color/text_primary"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:elevation="8dp"
+        android:stateListAnimator="@null"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHorizontal_bias="0.492"
-        app:layout_constraintStart_toStartOf="parent" />
-
-    <EditText
-        android:id="@+id/ipAddr"
-        android:layout_width="147dp"
-        android:layout_height="48dp"
-        android:ems="10"
-        android:foregroundGravity="center_horizontal"
-        android:inputType="text"
-        android:text="192.168.68.54"
-        android:textAlignment="center"
-        app:layout_constraintBottom_toTopOf="@+id/StartStreaming"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHorizontal_bias="0.5"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_bias="1.0" />
-
-    <TextView
-        android:id="@+id/unixTime"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="1dp"
-        android:text="unixTime"
-        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintDimensionRatio="1:1"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/StopStreaming" />
+        app:layout_constraintTop_toTopOf="parent" />
+
 </androidx.constraintlayout.widget.ConstraintLayout>

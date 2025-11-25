@@ -1,6 +1,8 @@
 package com.example.sensorstreamerwearos;
 
 import android.Manifest;
+import android.animation.AnimatorSet;
+import android.animation.ObjectAnimator;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -9,9 +11,8 @@ import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.util.Log;
-import android.view.View;
+import android.view.animation.AccelerateDecelerateInterpolator;
 import android.widget.Button;
-import android.widget.TextView;
 import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -26,11 +27,13 @@ import java.util.Map;
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
+    private static final String DEFAULT_IP = "192.168.68.54";
+    
     private ActivityMainBinding binding;
     private HeartRateForegroundService mService;
     private boolean mBound = false;
-    private TextView ipAddr;
-    private Button startButton, stopButton;
+    private Button toggleButton;
+    private boolean isRunning = false;
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override
@@ -69,12 +72,11 @@ public class MainActivity extends AppCompatActivity {
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
-        ipAddr = binding.ipAddr;
-        startButton = binding.StartStreaming;
-        stopButton = binding.StopStreaming;
-
-        startButton.setOnClickListener(v -> startStreaming());
-        stopButton.setOnClickListener(v -> stopStreaming());
+        toggleButton = binding.toggleButton;
+        toggleButton.setOnClickListener(v -> {
+            animateButtonPress();
+            toggleStreaming();
+        });
 
         checkPermissions();
     }
@@ -95,16 +97,18 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void startStreaming() {
-        String ip = ipAddr.getText().toString();
-        if (ip.isEmpty()) {
-            Toast.makeText(this, "Enter IP Address", Toast.LENGTH_SHORT).show();
-            return;
+    private void toggleStreaming() {
+        if (isRunning) {
+            stopStreaming();
+        } else {
+            startStreaming();
         }
+    }
 
+    private void startStreaming() {
         Intent intent = new Intent(this, HeartRateForegroundService.class);
         intent.setAction("START");
-        intent.putExtra("IP", ip);
+        intent.putExtra("IP", DEFAULT_IP);
         startService(intent);
         updateUI(true);
     }
@@ -116,9 +120,45 @@ public class MainActivity extends AppCompatActivity {
         updateUI(false);
     }
 
-    private void updateUI(boolean isRunning) {
-        startButton.setEnabled(!isRunning);
-        stopButton.setEnabled(isRunning);
+    private void updateUI(boolean running) {
+        isRunning = running;
+        if (running) {
+            // Stop state
+            toggleButton.setText("Stop");
+            toggleButton.setBackgroundResource(R.drawable.button_stop);
+        } else {
+            // Start state
+            toggleButton.setText("Start");
+            toggleButton.setBackgroundResource(R.drawable.button_start);
+        }
+    }
+
+    private void animateButtonPress() {
+        // Scale down animation
+        ObjectAnimator scaleDownX = ObjectAnimator.ofFloat(toggleButton, "scaleX", 0.92f);
+        ObjectAnimator scaleDownY = ObjectAnimator.ofFloat(toggleButton, "scaleY", 0.92f);
+        scaleDownX.setDuration(100);
+        scaleDownY.setDuration(100);
+
+        // Scale up animation
+        ObjectAnimator scaleUpX = ObjectAnimator.ofFloat(toggleButton, "scaleX", 1.0f);
+        ObjectAnimator scaleUpY = ObjectAnimator.ofFloat(toggleButton, "scaleY", 1.0f);
+        scaleUpX.setDuration(100);
+        scaleUpY.setDuration(100);
+
+        // Create animation set
+        AnimatorSet scaleDown = new AnimatorSet();
+        scaleDown.play(scaleDownX).with(scaleDownY);
+        scaleDown.setInterpolator(new AccelerateDecelerateInterpolator());
+
+        AnimatorSet scaleUp = new AnimatorSet();
+        scaleUp.play(scaleUpX).with(scaleUpY);
+        scaleUp.setInterpolator(new AccelerateDecelerateInterpolator());
+
+        // Play animations sequentially
+        AnimatorSet animatorSet = new AnimatorSet();
+        animatorSet.play(scaleDown).before(scaleUp);
+        animatorSet.start();
     }
 
     private void checkPermissions() {

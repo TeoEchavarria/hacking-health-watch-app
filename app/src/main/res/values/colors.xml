@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Background colors -->
+    <color name="background_primary">#0A0E27</color>
+    <color name="background_gradient_start">#0A0E27</color>
+    <color name="background_gradient_end">#1A1F3A</color>
+    
+    <!-- Start button - vibrant neon blue -->
+    <color name="button_start">#00D9FF</color>
+    <color name="button_start_pressed">#00B8D4</color>
+    
+    <!-- Stop button - vibrant red -->
+    <color name="button_stop">#FF3B5C</color>
+    <color name="button_stop_pressed">#E6334F</color>
+    
+    <!-- Text colors -->
+    <color name="text_primary">#FFFFFF</color>
+</resources>
