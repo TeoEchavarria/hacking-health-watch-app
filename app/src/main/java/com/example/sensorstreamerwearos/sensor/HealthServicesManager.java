@@ -1,35 +1,34 @@
 package com.example.sensorstreamerwearos.sensor;
 
 import android.content.Context;
-import android.os.SystemClock;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.util.Log;
-import androidx.health.services.client.HealthServices;
-import androidx.health.services.client.MeasureClient;
-import androidx.health.services.client.MeasureCallback;
-import androidx.health.services.client.data.Availability;
-import androidx.health.services.client.data.DataPointContainer;
-import androidx.health.services.client.data.DataType;
-import androidx.health.services.client.data.DeltaDataType;
-import androidx.health.services.client.data.SampleDataPoint;
 import com.example.sensorstreamerwearos.model.SensorData;
-import java.time.Instant;
-import java.util.List;
 
-public class HealthServicesManager {
+public class HealthServicesManager implements SensorEventListener {
     private static final String TAG = "HealthServicesManager";
-    private MeasureClient measureClient;
-    private MeasureCallback measureCallback;
+    private static final long SEND_INTERVAL_MS = 1000; // Send data every 1 second
+    private SensorManager sensorManager;
+    private Sensor accelerometer;
     private SensorDataListener listener;
+    private long lastSendTime = 0;
 
     public interface SensorDataListener {
         void onSensorData(SensorData data);
     }
 
     public HealthServicesManager(Context context) {
-        try {
-            measureClient = HealthServices.getClient(context).getMeasureClient();
-        } catch (Exception e) {
-            Log.e(TAG, "Health Services not available", e);
+        sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
+        if (sensorManager != null) {
+            accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+            if (accelerometer == null) {
+                Log.e(TAG, "Accelerometer sensor not available");
+            }
+        } else {
+            Log.e(TAG, "SensorManager not available");
         }
     }
 
@@ -37,40 +36,48 @@ public class HealthServicesManager {
         this.listener = listener;
     }
 
-    public void startHeartRateMonitoring() {
-        if (measureClient == null) return;
+    public void startAccelerometerMonitoring() {
+        if (sensorManager == null || accelerometer == null) {
+            Log.e(TAG, "Cannot start monitoring - sensor not available");
+            return;
+        }
 
-        Log.d(TAG, "Starting HR monitoring");
-        measureCallback = new MeasureCallback() {
-            @Override
-            public void onAvailabilityChanged(DeltaDataType dataType, Availability availability) {
-                Log.d(TAG, "Availability changed: " + availability);
-            }
-
-            @Override
-            public void onDataReceived(DataPointContainer dataPointContainer) {
-                List<SampleDataPoint<Double>> dataPoints = dataPointContainer.getData(DataType.HEART_RATE_BPM);
-                Instant bootInstant = Instant.ofEpochMilli(System.currentTimeMillis() - SystemClock.elapsedRealtime());
-                
-                for (SampleDataPoint<Double> point : dataPoints) {
-                    double heartRate = point.getValue();
-                    long timestamp = point.getTimeInstant(bootInstant).toEpochMilli();
-                    Log.d(TAG, "HR: " + heartRate);
-                    
-                    if (listener != null) {
-                        listener.onSensorData(new SensorData(timestamp, "hr", new float[]{(float) heartRate}));
-                    }
-                }
-            }
-        };
-
-        measureClient.registerMeasureCallback(DataType.HEART_RATE_BPM, measureCallback);
+        Log.d(TAG, "Starting Accelerometer monitoring");
+        // SENSOR_DELAY_NORMAL = ~200ms, SENSOR_DELAY_GAME = ~20ms, SENSOR_DELAY_FASTEST = as fast as possible
+        sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME);
     }
 
-    public void stopHeartRateMonitoring() {
-        if (measureClient != null && measureCallback != null) {
-            Log.d(TAG, "Stopping HR monitoring");
-            measureClient.unregisterMeasureCallbackAsync(DataType.HEART_RATE_BPM, measureCallback);
+    public void stopAccelerometerMonitoring() {
+        if (sensorManager != null) {
+            Log.d(TAG, "Stopping Accelerometer monitoring");
+            sensorManager.unregisterListener(this);
         }
+    }
+
+    @Override
+    public void onSensorChanged(SensorEvent event) {
+        if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
+            long currentTime = System.currentTimeMillis();
+            
+            // Only send data every SEND_INTERVAL_MS (1 second)
+            if (currentTime - lastSendTime >= SEND_INTERVAL_MS) {
+                float x = event.values[0];
+                float y = event.values[1];
+                float z = event.values[2];
+                
+                Log.d(TAG, String.format("Accel: X=%.2f Y=%.2f Z=%.2f", x, y, z));
+                
+                if (listener != null) {
+                    listener.onSensorData(new SensorData(currentTime, "accel", new float[]{x, y, z}));
+                }
+                
+                lastSendTime = currentTime;
+            }
+        }
+    }
+
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {
+        Log.d(TAG, "Sensor accuracy changed: " + accuracy);
     }
 }

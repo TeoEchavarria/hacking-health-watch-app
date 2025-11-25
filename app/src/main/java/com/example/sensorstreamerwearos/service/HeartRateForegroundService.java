@@ -77,7 +77,7 @@ public class HeartRateForegroundService extends LifecycleService {
 
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Sensor Streamer")
-                .setContentText("Streaming Heart Rate Data...")
+                .setContentText("Streaming Accelerometer Data...")
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
@@ -90,13 +90,13 @@ public class HeartRateForegroundService extends LifecycleService {
         }
 
         udpRepository.start(ip, 5005);
-        healthServicesManager.startHeartRateMonitoring();
+        healthServicesManager.startAccelerometerMonitoring();
         isRunning = true;
     }
 
     private void stopService() {
         Log.d(TAG, "Stopping Service");
-        healthServicesManager.stopHeartRateMonitoring();
+        healthServicesManager.stopAccelerometerMonitoring();
         udpRepository.stop();
         stopForeground(true);
         stopSelf();
