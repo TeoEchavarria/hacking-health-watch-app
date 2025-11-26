@@ -17,7 +17,7 @@ import androidx.lifecycle.LifecycleService;
 import com.example.sensorstreamerwearos.MainActivity;
 import com.example.sensorstreamerwearos.R;
 import com.example.sensorstreamerwearos.model.SensorData;
-import com.example.sensorstreamerwearos.network.UdpRepository;
+import com.example.sensorstreamerwearos.network.WatchDataSender;
 import com.example.sensorstreamerwearos.sensor.HealthServicesManager;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,7 +33,7 @@ public class HeartRateForegroundService extends LifecycleService {
     private static final long BATCH_INTERVAL_MS = 300000; // 5 minutes
 
     private HealthServicesManager healthServicesManager;
-    private UdpRepository udpRepository;
+    private WatchDataSender watchDataSender;
     private final IBinder binder = new LocalBinder();
     private boolean isRunning = false;
     
@@ -53,7 +53,7 @@ public class HeartRateForegroundService extends LifecycleService {
         super.onCreate();
         Log.d(TAG, "onCreate");
         healthServicesManager = new HealthServicesManager(this);
-        udpRepository = new UdpRepository();
+        watchDataSender = new WatchDataSender(this);
         
         // Add data to buffer instead of sending immediately
         healthServicesManager.setListener(data -> {
@@ -82,8 +82,7 @@ public class HeartRateForegroundService extends LifecycleService {
         if (intent != null) {
             String action = intent.getAction();
             if ("START".equals(action)) {
-                String ip = intent.getStringExtra("IP");
-                startService(ip);
+                startService();
             } else if ("STOP".equals(action)) {
                 stopService();
             }
@@ -92,10 +91,10 @@ public class HeartRateForegroundService extends LifecycleService {
         return START_STICKY;
     }
 
-    private void startService(String ip) {
+    private void startService() {
         if (isRunning) return;
         
-        Log.d(TAG, "Starting Service with IP: " + ip);
+        Log.d(TAG, "Starting Service");
         createNotificationChannel();
         
         Intent notificationIntent = new Intent(this, MainActivity.class);
@@ -116,7 +115,7 @@ public class HeartRateForegroundService extends LifecycleService {
             startForeground(NOTIFICATION_ID, notification);
         }
 
-        udpRepository.start(ip, 5005);
+
         healthServicesManager.startAccelerometerMonitoring();
         
         // Start batch sending timer
@@ -135,7 +134,7 @@ public class HeartRateForegroundService extends LifecycleService {
         sendBatchData();
         
         healthServicesManager.stopAccelerometerMonitoring();
-        udpRepository.stop();
+
         stopForeground(true);
         stopSelf();
         isRunning = false;
@@ -157,10 +156,7 @@ public class HeartRateForegroundService extends LifecycleService {
         
         Log.d(TAG, "Sending batch of " + dataToSend.size() + " samples");
         
-        // Send each data point
-        for (SensorData data : dataToSend) {
-            udpRepository.sendData(data);
-        }
+        watchDataSender.sendBatch(dataToSend);
     }
 
     public boolean isRunning() {

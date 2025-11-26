@@ -67,7 +67,7 @@ public class HealthServicesManager implements SensorEventListener {
                 float z = event.values[2];
                 
                 if (listener != null) {
-                    listener.onSensorData(new SensorData(currentTime, "accel", new float[]{x, y, z}));
+                    listener.onSensorData(new SensorData("accel", currentTime, new float[]{x, y, z}));
                 }
                 
                 lastSampleTime = currentTime;

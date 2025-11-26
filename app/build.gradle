@@ -1,6 +1,12 @@
 plugins {
     id 'com.android.application'
+    id 'org.jetbrains.kotlin.android' version '1.8.10'
+    id 'org.jetbrains.kotlin.plugin.serialization' version '1.8.10'
 }
+
+
+
+
 
 android {
     namespace 'com.example.sensorstreamerwearos'
@@ -28,6 +34,9 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
 }
 
 dependencies {
@@ -49,6 +58,7 @@ dependencies {
     // Coroutines
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.7.3"
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3"
 
     // Lifecycle
     implementation "androidx.lifecycle:lifecycle-service:2.7.0"
@@ -57,4 +67,7 @@ dependencies {
     implementation "androidx.concurrent:concurrent-futures:1.1.0"
 
     compileOnly 'com.google.android.wearable:wearable:2.9.0'
+    
+    // Serialization
+    implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0"
 }
