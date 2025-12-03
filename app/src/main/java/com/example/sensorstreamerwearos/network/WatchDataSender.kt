@@ -71,7 +71,12 @@ class WatchDataSender(private val context: Context) {
     fun sendBatch(batch: List<SensorData>) {
         scope.launch {
             try {
-                if (batch.isEmpty()) return@launch
+                Log.d(TAG, "📦 sendBatch called with ${batch.size} items")
+                
+                if (batch.isEmpty()) {
+                    Log.w(TAG, "⚠️ Batch is empty, skipping send")
+                    return@launch
+                }
 
                 val nodeId = getBestNode()
                 if (nodeId == null) {
@@ -80,6 +85,7 @@ class WatchDataSender(private val context: Context) {
                 }
 
                 val jsonString = Json.encodeToString(batch)
+                Log.d(TAG, "📤 Sending batch JSON (${jsonString.length} chars) to node $nodeId")
                 val byteArray = jsonString.toByteArray(Charsets.UTF_8)
 
                 val putDataMapReq = PutDataMapRequest.create("/sensor_batch")
@@ -90,7 +96,7 @@ class WatchDataSender(private val context: Context) {
                 putDataReq.setUrgent()
 
                 dataClient.putDataItem(putDataReq).await()
-                Log.d(TAG, "✅ Sent batch of ${batch.size} items to /sensor_batch")
+                Log.d(TAG, "✅ Sent batch of ${batch.size} items to /sensor_batch successfully!")
 
             } catch (e: Exception) {
                 Log.e(TAG, "❌ Error sending batch", e)
@@ -120,6 +126,34 @@ class WatchDataSender(private val context: Context) {
                 
             } catch (e: Exception) {
                 Log.e(TAG, "❌ Error sending PING", e)
+            }
+        }
+    }
+    
+    // TEST: Send accelerometer data using the same method as PING
+    fun sendAccelTestData() {
+        scope.launch {
+            try {
+                Log.d(TAG, "🧪 TEST: Sending accelerometer data like PING...")
+                
+                val nodeId = getBestNode()
+                if (nodeId == null) {
+                    Log.e(TAG, "❌ Cannot send accel test - no connected nodes")
+                    return@launch
+                }
+
+                val putDataMapReq = PutDataMapRequest.create("/accel_test")
+                putDataMapReq.dataMap.putString("accel_data", "x=1.0,y=2.0,z=3.0")
+                putDataMapReq.dataMap.putLong("timestamp", System.currentTimeMillis())
+                val putDataReq = putDataMapReq.asPutDataRequest()
+                putDataReq.setUrgent()
+                
+                Log.d(TAG, "📤 Sending ACCEL TEST via DataClient...")
+                dataClient.putDataItem(putDataReq).await()
+                Log.d(TAG, "✅ ACCEL TEST sent successfully!")
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Error sending accel test", e)
             }
         }
     }

@@ -34,6 +34,9 @@ class WatchReceiverService : WearableListenerService() {
                     val nodeId = event.dataItem.uri.host ?: "unknown"
                     Log.d(TAG, "Handshake request received from $nodeId")
                     sendHandshakeResponse(nodeId)
+                } else if (path == "/pong") {
+                    Log.d(TAG, "🏓 PONG received from phone!")
+                    com.example.sensorstreamerwearos.network.ConnectionManager.setVerified()
                 }
             }
         }

@@ -68,6 +68,8 @@ public class HealthServicesManager implements SensorEventListener {
                 float y = event.values[1];
                 float z = event.values[2];
                 
+                Log.d(TAG, "📊 Accel sample: x=" + x + ", y=" + y + ", z=" + z);
+                
                 if (listener != null) {
                     listener.onSensorData(new SensorData(deviceId, "accel", currentTime, new float[]{x, y, z}));
                 }

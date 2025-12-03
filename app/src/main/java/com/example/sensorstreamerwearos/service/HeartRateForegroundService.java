@@ -4,12 +4,10 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
-import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Binder;
 import android.os.Build;
-import android.os.Handler;
 import android.os.IBinder;
 import android.util.Log;
 import androidx.core.app.NotificationCompat;
@@ -18,29 +16,20 @@ import com.example.sensorstreamerwearos.MainActivity;
 import com.example.sensorstreamerwearos.R;
 import com.example.sensorstreamerwearos.model.SensorData;
 import com.example.sensorstreamerwearos.network.WatchDataSender;
+import com.example.sensorstreamerwearos.network.ConnectionManager;
 import com.example.sensorstreamerwearos.sensor.HealthServicesManager;
-import java.util.ArrayList;
-import java.util.List;
 
-public class HeartRateForegroundService extends LifecycleService {
+public class HeartRateForegroundService extends LifecycleService implements ConnectionManager.ConnectionStateListener {
 
     private static final String TAG = "HeartRateService";
     private static final String CHANNEL_ID = "HeartRateServiceChannel";
     private static final int NOTIFICATION_ID = 1;
     
-    // CONFIGURABLE: Change this value to adjust batch interval (in milliseconds)
-    // 30 seconds = 30000, 1 minute = 60000, 2 hours = 7200000
-    private static final long BATCH_INTERVAL_MS = 300000; // 5 minutes
-
     private HealthServicesManager healthServicesManager;
     private WatchDataSender watchDataSender;
     private final IBinder binder = new LocalBinder();
     private boolean isRunning = false;
-    
-    // Data batching
-    private final List<SensorData> dataBuffer = new ArrayList<>();
-    private final Handler batchHandler = new Handler();
-    private Runnable batchRunnable;
+    private boolean shouldBeRunning = false;
 
     public class LocalBinder extends Binder {
         public HeartRateForegroundService getService() {
@@ -55,23 +44,42 @@ public class HeartRateForegroundService extends LifecycleService {
         healthServicesManager = new HealthServicesManager(this);
         watchDataSender = new WatchDataSender(this);
         
-        // Add data to buffer instead of sending immediately
         healthServicesManager.setListener(data -> {
-            synchronized (dataBuffer) {
-                dataBuffer.add(data);
-            }
+             if (ConnectionManager.INSTANCE.isVerified()) {
+                 watchDataSender.sendSensorData(data);
+             } else {
+                 Log.w(TAG, "Data sampled but connection lost. Stopping & Re-handshaking.");
+                 stopAccelerometerMonitoring();
+                 watchDataSender.sendPing();
+                 ConnectionManager.INSTANCE.setVerifying();
+             }
         });
         
-        // Setup batch sending timer
-        batchRunnable = new Runnable() {
-            @Override
-            public void run() {
-                sendBatchData();
-                if (isRunning) {
-                    batchHandler.postDelayed(this, BATCH_INTERVAL_MS);
+        ConnectionManager.INSTANCE.addListener(this);
+    }
+    
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        ConnectionManager.INSTANCE.removeListener(this);
+    }
+
+    @Override
+    public void onStateChanged(ConnectionManager.State state) {
+        Log.d(TAG, "onStateChanged: " + state);
+        if (shouldBeRunning) {
+            if (state == ConnectionManager.State.VERIFIED) {
+                startAccelerometerMonitoring();
+            } else {
+                stopAccelerometerMonitoring();
+                // If we should be running but lost connection, try to recover
+                if (state == ConnectionManager.State.UNVERIFIED) {
+                    Log.d(TAG, "Connection lost, attempting to re-handshake...");
+                    watchDataSender.sendPing();
+                    ConnectionManager.INSTANCE.setVerifying();
                 }
             }
-        };
+        }
     }
 
     @Override
@@ -95,15 +103,15 @@ public class HeartRateForegroundService extends LifecycleService {
         if (isRunning) return;
         
         Log.d(TAG, "Starting Service");
+        shouldBeRunning = true;
         createNotificationChannel();
         
         Intent notificationIntent = new Intent(this, MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE);
 
-        int intervalSeconds = (int) (BATCH_INTERVAL_MS / 1000);
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Sensor Streamer")
-                .setContentText("Batching data (sending every " + intervalSeconds + "s)")
+                .setContentText("Streaming (Verified Only)")
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
@@ -115,39 +123,37 @@ public class HeartRateForegroundService extends LifecycleService {
             startForeground(NOTIFICATION_ID, notification);
         }
 
-
-        healthServicesManager.startAccelerometerMonitoring();
+        // Trigger check
+        if (ConnectionManager.INSTANCE.isVerified()) {
+            startAccelerometerMonitoring();
+        } else {
+            Log.d(TAG, "Service started but not verified. Requesting Handshake...");
+            watchDataSender.sendPing();
+            ConnectionManager.INSTANCE.setVerifying();
+        }
         
         isRunning = true;
     }
 
     private void stopService() {
         Log.d(TAG, "Stopping Service");
+        shouldBeRunning = false;
         
-        healthServicesManager.stopAccelerometerMonitoring();
+        stopAccelerometerMonitoring();
 
         stopForeground(true);
         stopSelf();
         isRunning = false;
     }
     
-    private void sendBatchData() {
-        List<SensorData> dataToSend;
-        
-        synchronized (dataBuffer) {
-            if (dataBuffer.isEmpty()) {
-                Log.d(TAG, "No data to send");
-                return;
-            }
-            
-            // Create a copy and clear the buffer
-            dataToSend = new ArrayList<>(dataBuffer);
-            dataBuffer.clear();
-        }
-        
-        Log.d(TAG, "Sending batch of " + dataToSend.size() + " samples");
-        
-        watchDataSender.sendBatch(dataToSend);
+    private void startAccelerometerMonitoring() {
+        Log.d(TAG, "Starting Accelerometer Monitoring");
+        healthServicesManager.startAccelerometerMonitoring();
+    }
+
+    private void stopAccelerometerMonitoring() {
+        Log.d(TAG, "Stopping Accelerometer Monitoring");
+        healthServicesManager.stopAccelerometerMonitoring();
     }
 
     public boolean isRunning() {
