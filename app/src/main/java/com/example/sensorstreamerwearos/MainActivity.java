@@ -78,6 +78,11 @@ public class MainActivity extends AppCompatActivity {
             toggleStreaming();
         });
 
+        binding.pingButton.setOnClickListener(v -> {
+            new com.example.sensorstreamerwearos.network.WatchDataSender(this).sendPing();
+            Toast.makeText(this, "Ping sent", Toast.LENGTH_SHORT).show();
+        });
+
         checkPermissions();
     }
 
