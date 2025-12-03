@@ -16,6 +16,7 @@ import kotlinx.serialization.json.Json
 class WatchDataSender(private val context: Context) {
 
     private val dataClient by lazy { Wearable.getDataClient(context) }
+    private val messageClient by lazy { Wearable.getMessageClient(context) }
     private val nodeClient by lazy { Wearable.getNodeClient(context) }
     private val capabilityClient by lazy { Wearable.getCapabilityClient(context) }
     private val scope = CoroutineScope(Dispatchers.IO)
@@ -47,6 +48,23 @@ class WatchDataSender(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error finding capable nodes", e)
             null
+        }
+    }
+
+    fun sendSensorData(data: SensorData) {
+        scope.launch {
+            try {
+                val nodeId = getBestNode()
+                if (nodeId == null) return@launch
+
+                val jsonString = Json.encodeToString(data)
+                val byteArray = jsonString.toByteArray(Charsets.UTF_8)
+
+                messageClient.sendMessage(nodeId, "/sensor_data", byteArray).await()
+                Log.d(TAG, "✅ Sent sensor data to $nodeId")
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Error sending sensor data", e)
+            }
         }
     }
 

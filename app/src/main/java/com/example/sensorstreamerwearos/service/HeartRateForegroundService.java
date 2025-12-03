@@ -118,20 +118,11 @@ public class HeartRateForegroundService extends LifecycleService {
 
         healthServicesManager.startAccelerometerMonitoring();
         
-        // Start batch sending timer
-        batchHandler.postDelayed(batchRunnable, BATCH_INTERVAL_MS);
-        
         isRunning = true;
     }
 
     private void stopService() {
         Log.d(TAG, "Stopping Service");
-        
-        // Stop batch timer
-        batchHandler.removeCallbacks(batchRunnable);
-        
-        // Send any remaining data before stopping
-        sendBatchData();
         
         healthServicesManager.stopAccelerometerMonitoring();
 

@@ -15,6 +15,7 @@ public class HealthServicesManager implements SensorEventListener {
     private Sensor accelerometer;
     private SensorDataListener listener;
     private long lastSampleTime = 0;
+    private String deviceId;
 
     public interface SensorDataListener {
         void onSensorData(SensorData data);
@@ -22,6 +23,7 @@ public class HealthServicesManager implements SensorEventListener {
 
     public HealthServicesManager(Context context) {
         sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
+        deviceId = android.provider.Settings.Secure.getString(context.getContentResolver(), android.provider.Settings.Secure.ANDROID_ID);
         if (sensorManager != null) {
             accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
             if (accelerometer == null) {
@@ -67,7 +69,7 @@ public class HealthServicesManager implements SensorEventListener {
                 float z = event.values[2];
                 
                 if (listener != null) {
-                    listener.onSensorData(new SensorData("accel", currentTime, new float[]{x, y, z}));
+                    listener.onSensorData(new SensorData(deviceId, "accel", currentTime, new float[]{x, y, z}));
                 }
                 
                 lastSampleTime = currentTime;
