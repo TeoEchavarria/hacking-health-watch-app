@@ -8,6 +8,7 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Binder;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
 import android.util.Log;
 import androidx.core.app.NotificationCompat;
@@ -18,6 +19,8 @@ import com.example.sensorstreamerwearos.model.SensorData;
 import com.example.sensorstreamerwearos.network.WatchDataSender;
 import com.example.sensorstreamerwearos.network.ConnectionManager;
 import com.example.sensorstreamerwearos.sensor.HealthServicesManager;
+import java.util.ArrayList;
+import java.util.List;
 
 public class HeartRateForegroundService extends LifecycleService implements ConnectionManager.ConnectionStateListener {
 
@@ -25,11 +28,19 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
     private static final String CHANNEL_ID = "HeartRateServiceChannel";
     private static final int NOTIFICATION_ID = 1;
     
+    // 3 minutes in milliseconds
+    private static final long BATCH_INTERVAL_MS = 180000;
+
     private HealthServicesManager healthServicesManager;
     private WatchDataSender watchDataSender;
     private final IBinder binder = new LocalBinder();
     private boolean isRunning = false;
     private boolean shouldBeRunning = false;
+    
+    // Data batching
+    private final List<SensorData> dataBuffer = new ArrayList<>();
+    private final Handler batchHandler = new Handler();
+    private Runnable batchRunnable;
 
     public class LocalBinder extends Binder {
         public HeartRateForegroundService getService() {
@@ -46,7 +57,9 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
         
         healthServicesManager.setListener(data -> {
              if (ConnectionManager.INSTANCE.isVerified()) {
-                 watchDataSender.sendSensorData(data);
+                 synchronized (dataBuffer) {
+                     dataBuffer.add(data);
+                 }
              } else {
                  Log.w(TAG, "Data sampled but connection lost. Stopping & Re-handshaking.");
                  stopAccelerometerMonitoring();
@@ -56,12 +69,24 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
         });
         
         ConnectionManager.INSTANCE.addListener(this);
+        
+        // Setup batch sending timer
+        batchRunnable = new Runnable() {
+            @Override
+            public void run() {
+                sendBatchData();
+                if (isRunning) {
+                    batchHandler.postDelayed(this, BATCH_INTERVAL_MS);
+                }
+            }
+        };
     }
     
     @Override
     public void onDestroy() {
         super.onDestroy();
         ConnectionManager.INSTANCE.removeListener(this);
+        batchHandler.removeCallbacks(batchRunnable);
     }
 
     @Override
@@ -70,8 +95,12 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
         if (shouldBeRunning) {
             if (state == ConnectionManager.State.VERIFIED) {
                 startAccelerometerMonitoring();
+                // Ensure batch timer is running
+                batchHandler.removeCallbacks(batchRunnable);
+                batchHandler.postDelayed(batchRunnable, BATCH_INTERVAL_MS);
             } else {
                 stopAccelerometerMonitoring();
+                batchHandler.removeCallbacks(batchRunnable);
                 // If we should be running but lost connection, try to recover
                 if (state == ConnectionManager.State.UNVERIFIED) {
                     Log.d(TAG, "Connection lost, attempting to re-handshake...");
@@ -111,7 +140,7 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
 
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Sensor Streamer")
-                .setContentText("Streaming (Verified Only)")
+                .setContentText("Batching Data (Verified Only)")
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
@@ -126,6 +155,7 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
         // Trigger check
         if (ConnectionManager.INSTANCE.isVerified()) {
             startAccelerometerMonitoring();
+            batchHandler.postDelayed(batchRunnable, BATCH_INTERVAL_MS);
         } else {
             Log.d(TAG, "Service started but not verified. Requesting Handshake...");
             watchDataSender.sendPing();
@@ -140,10 +170,34 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
         shouldBeRunning = false;
         
         stopAccelerometerMonitoring();
+        batchHandler.removeCallbacks(batchRunnable);
 
         stopForeground(true);
         stopSelf();
         isRunning = false;
+    }
+    
+    private void sendBatchData() {
+        if (!ConnectionManager.INSTANCE.isVerified()) {
+            Log.w(TAG, "Skipping batch send: Connection NOT VERIFIED");
+            return;
+        }
+
+        List<SensorData> dataToSend;
+        
+        synchronized (dataBuffer) {
+            if (dataBuffer.isEmpty()) {
+                Log.d(TAG, "No data to send");
+                return;
+            }
+            
+            // Create a copy and clear the buffer
+            dataToSend = new ArrayList<>(dataBuffer);
+            dataBuffer.clear();
+        }
+        
+        Log.d(TAG, "Sending batch of " + dataToSend.size() + " samples");
+        watchDataSender.sendBatch(dataToSend);
     }
     
     private void startAccelerometerMonitoring() {
