@@ -88,6 +88,10 @@ class WatchDataSender(private val context: Context) {
                 Log.d(TAG, "📤 Sending batch JSON (${jsonString.length} chars) to node $nodeId")
                 val byteArray = jsonString.toByteArray(Charsets.UTF_8)
 
+                // Log the attempt to send
+                val summary = "count=${batch.size}, range=[${batch.first().timestamp}..${batch.last().timestamp}]"
+                Log.d("ACCEL_WATCH_TO_PHONE", "Sending batch: $summary")
+
                 val putDataMapReq = PutDataMapRequest.create("/sensor_batch")
                 putDataMapReq.dataMap.putByteArray("batch_data", byteArray)
                 putDataMapReq.dataMap.putLong("timestamp", System.currentTimeMillis())
