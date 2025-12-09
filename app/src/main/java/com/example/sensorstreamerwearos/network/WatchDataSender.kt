@@ -101,6 +101,7 @@ class WatchDataSender(private val context: Context) {
 
                 dataClient.putDataItem(putDataReq).await()
                 Log.d(TAG, "✅ Sent batch of ${batch.size} items to /sensor_batch successfully!")
+                Log.d("ACCEL_WATCH_TO_PHONE", "WATCH_ACCEL_MESSAGE_SENT: count=${batch.size}")
 
             } catch (e: Exception) {
                 Log.e(TAG, "❌ Error sending batch", e)
@@ -119,13 +120,9 @@ class WatchDataSender(private val context: Context) {
                     return@launch
                 }
 
-                val putDataMapReq = PutDataMapRequest.create("/ping")
-                putDataMapReq.dataMap.putLong("timestamp", System.currentTimeMillis())
-                val putDataReq = putDataMapReq.asPutDataRequest()
-                putDataReq.setUrgent()
-                
-                Log.d(TAG, "📤 Sending PING via DataClient...")
-                dataClient.putDataItem(putDataReq).await()
+                // Use MessageClient for PING as it is faster and doesn't rely on data changing
+                Log.d(TAG, "📤 Sending PING via MessageClient to $nodeId...")
+                messageClient.sendMessage(nodeId, "/ping", "ping".toByteArray()).await()
                 Log.d(TAG, "✅ PING sent successfully!")
                 
             } catch (e: Exception) {

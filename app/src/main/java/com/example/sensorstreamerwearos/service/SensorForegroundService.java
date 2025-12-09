@@ -10,6 +10,7 @@ import android.os.Binder;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
+import android.os.PowerManager;
 import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import androidx.lifecycle.LifecycleService;
@@ -19,14 +20,21 @@ import com.example.sensorstreamerwearos.model.SensorData;
 import com.example.sensorstreamerwearos.network.WatchDataSender;
 import com.example.sensorstreamerwearos.network.ConnectionManager;
 import com.example.sensorstreamerwearos.sensor.HealthServicesManager;
+import com.google.android.gms.wearable.DataClient;
+import com.google.android.gms.wearable.DataEvent;
+import com.google.android.gms.wearable.DataEventBuffer;
+import com.google.android.gms.wearable.MessageClient;
+import com.google.android.gms.wearable.MessageEvent;
+import com.google.android.gms.wearable.Wearable;
+
 import java.util.ArrayList;
 import java.util.List;
 
-public class HeartRateForegroundService extends LifecycleService implements ConnectionManager.ConnectionStateListener {
+public class SensorForegroundService extends LifecycleService implements ConnectionManager.ConnectionStateListener, DataClient.OnDataChangedListener, MessageClient.OnMessageReceivedListener {
 
-    private static final String TAG = "HeartRateService";
-    private static final String CHANNEL_ID = "HeartRateServiceChannel";
-    private static final int NOTIFICATION_ID = 1;
+    private static final String TAG = "SensorForegroundService";
+    private static final String CHANNEL_ID = "SensorServiceChannel";
+    private static final int NOTIFICATION_ID = 101;
     
     // 3 minutes in milliseconds
     private static final long BATCH_INTERVAL_MS = 180000;
@@ -37,34 +45,44 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
     private boolean isRunning = false;
     private boolean shouldBeRunning = false;
     
+    private PowerManager.WakeLock wakeLock;
+    
     // Data batching
     private final List<SensorData> dataBuffer = new ArrayList<>();
     private final Handler batchHandler = new Handler();
     private Runnable batchRunnable;
 
     public class LocalBinder extends Binder {
-        public HeartRateForegroundService getService() {
-            return HeartRateForegroundService.this;
+        public SensorForegroundService getService() {
+            return SensorForegroundService.this;
         }
     }
 
     @Override
     public void onCreate() {
         super.onCreate();
-        Log.d(TAG, "onCreate");
+        Log.d(TAG, "WATCH_SERVICE_STARTED");
+        
+        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SensorStreamer::BatchWakeLock");
+
         healthServicesManager = new HealthServicesManager(this);
         watchDataSender = new WatchDataSender(this);
         
+        // Register Data Listener for persistent reception
+        Wearable.getDataClient(this).addListener(this);
+        Wearable.getMessageClient(this).addListener(this);
+        
         healthServicesManager.setListener(data -> {
-             if (ConnectionManager.INSTANCE.isVerified()) {
+             // Only collect if we are intending to run
+             if (shouldBeRunning) {
                  synchronized (dataBuffer) {
                      dataBuffer.add(data);
                  }
-             } else {
-                 Log.w(TAG, "Data sampled but connection lost. Stopping & Re-handshaking.");
-                 stopAccelerometerMonitoring();
-                 watchDataSender.sendPing();
-                 ConnectionManager.INSTANCE.setVerifying();
+                 if (!ConnectionManager.INSTANCE.isVerified()) {
+                     // Check if verified state is stale or lost
+                     // We keep collecting but maybe try to ping?
+                 }
              }
         });
         
@@ -74,7 +92,13 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
         batchRunnable = new Runnable() {
             @Override
             public void run() {
-                sendBatchData();
+                acquireWakeLock();
+                try {
+                    sendBatchData();
+                } finally {
+                    releaseWakeLock();
+                }
+                
                 if (isRunning) {
                     batchHandler.postDelayed(this, BATCH_INTERVAL_MS);
                 }
@@ -83,10 +107,58 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
     }
     
     @Override
+    public void onDataChanged(DataEventBuffer dataEvents) {
+        Log.d(TAG, "onDataChanged: " + dataEvents.getCount() + " events");
+        
+        for (DataEvent event : dataEvents) {
+            if (event.getType() == DataEvent.TYPE_CHANGED) {
+                String path = event.getDataItem().getUri().getPath();
+                String nodeId = event.getDataItem().getUri().getHost();
+                if (nodeId == null) nodeId = "unknown";
+                
+                Log.d(TAG, "Path: " + path);
+                
+                if (path.equals("/handshake_ack")) {
+                    Log.d(TAG, "✅ Handshake ACK received! (In Persistent Service)");
+                    ConnectionManager.INSTANCE.setVerified();
+                }
+            }
+        }
+    }
+
+    @Override
+    public void onMessageReceived(MessageEvent messageEvent) {
+        String path = messageEvent.getPath();
+        String nodeId = messageEvent.getSourceNodeId();
+        Log.d(TAG, "📨 onMessageReceived: " + path + " from " + nodeId);
+        
+        if (path.equals("/pong")) {
+            Log.d(TAG, "🏓 PONG Message received from phone! (In Persistent Service)");
+            ConnectionManager.INSTANCE.setVerified();
+        }
+    }
+    
+    private void acquireWakeLock() {
+        if (wakeLock != null && !wakeLock.isHeld()) {
+            wakeLock.acquire(10 * 60 * 1000L /*10 minutes*/);
+        }
+    }
+    
+    private void releaseWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
+    }
+    
+    @Override
     public void onDestroy() {
         super.onDestroy();
+        Log.d(TAG, "WATCH_SERVICE_STOPPED");
         ConnectionManager.INSTANCE.removeListener(this);
+        Wearable.getDataClient(this).removeListener(this);
+        Wearable.getMessageClient(this).removeListener(this);
         batchHandler.removeCallbacks(batchRunnable);
+        releaseWakeLock();
     }
 
     @Override
@@ -94,19 +166,13 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
         Log.d(TAG, "onStateChanged: " + state);
         if (shouldBeRunning) {
             if (state == ConnectionManager.State.VERIFIED) {
+                // Connection restored
                 startAccelerometerMonitoring();
-                // Ensure batch timer is running
-                batchHandler.removeCallbacks(batchRunnable);
-                batchHandler.postDelayed(batchRunnable, BATCH_INTERVAL_MS);
             } else {
-                stopAccelerometerMonitoring();
-                batchHandler.removeCallbacks(batchRunnable);
-                // If we should be running but lost connection, try to recover
-                if (state == ConnectionManager.State.UNVERIFIED) {
-                    Log.d(TAG, "Connection lost, attempting to re-handshake...");
-                    watchDataSender.sendPing();
-                    ConnectionManager.INSTANCE.setVerifying();
-                }
+                // Connection lost
+                // We keep monitoring, but we try to recover
+                Log.w(TAG, "Connection lost/unverified. Attempting Ping...");
+                watchDataSender.sendPing();
             }
         }
     }
@@ -114,9 +180,10 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         super.onStartCommand(intent, flags, startId);
-        Log.d(TAG, "onStartCommand");
-
-        if (intent != null) {
+        if (intent == null) {
+            Log.d(TAG, "WATCH_SERVICE_RESTARTED (system kill recovery)");
+            startService();
+        } else {
             String action = intent.getAction();
             if ("START".equals(action)) {
                 startService();
@@ -131,7 +198,7 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
     private void startService() {
         if (isRunning) return;
         
-        Log.d(TAG, "Starting Service");
+        Log.d(TAG, "Starting Sensor Service");
         shouldBeRunning = true;
         createNotificationChannel();
         
@@ -140,7 +207,7 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
 
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Sensor Streamer")
-                .setContentText("Batching Data (Verified Only)")
+                .setContentText("Collecting Data in Background")
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
@@ -152,12 +219,15 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
             startForeground(NOTIFICATION_ID, notification);
         }
 
-        // Trigger check
-        if (ConnectionManager.INSTANCE.isVerified()) {
-            startAccelerometerMonitoring();
-            batchHandler.postDelayed(batchRunnable, BATCH_INTERVAL_MS);
-        } else {
-            Log.d(TAG, "Service started but not verified. Requesting Handshake...");
+        startAccelerometerMonitoring();
+        
+        // Start batch timer
+        batchHandler.removeCallbacks(batchRunnable);
+        batchHandler.postDelayed(batchRunnable, BATCH_INTERVAL_MS);
+        
+        // Initial handshake check
+        if (!ConnectionManager.INSTANCE.isVerified()) {
+            Log.d(TAG, "Service started but not verified. Sending Ping...");
             watchDataSender.sendPing();
             ConnectionManager.INSTANCE.setVerifying();
         }
@@ -166,7 +236,7 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
     }
 
     private void stopService() {
-        Log.d(TAG, "Stopping Service");
+        Log.d(TAG, "Stopping Sensor Service");
         shouldBeRunning = false;
         
         stopAccelerometerMonitoring();
@@ -178,11 +248,8 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
     }
     
     private void sendBatchData() {
-        if (!ConnectionManager.INSTANCE.isVerified()) {
-            Log.w(TAG, "Skipping batch send: Connection NOT VERIFIED");
-            return;
-        }
-
+        Log.d(TAG, "WATCH_ACCEL_BATCH_ATTEMPT");
+        
         List<SensorData> dataToSend;
         
         synchronized (dataBuffer) {
@@ -201,12 +268,11 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
     }
     
     private void startAccelerometerMonitoring() {
-        Log.d(TAG, "Starting Accelerometer Monitoring");
+        Log.d(TAG, "WATCH_SENSOR_ACTIVE");
         healthServicesManager.startAccelerometerMonitoring();
     }
 
     private void stopAccelerometerMonitoring() {
-        Log.d(TAG, "Stopping Accelerometer Monitoring");
         healthServicesManager.stopAccelerometerMonitoring();
     }
 
@@ -224,7 +290,7 @@ public class HeartRateForegroundService extends LifecycleService implements Conn
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel serviceChannel = new NotificationChannel(
                     CHANNEL_ID,
-                    "Heart Rate Service Channel",
+                    "Sensor Service Channel",
                     NotificationManager.IMPORTANCE_DEFAULT
             );
             NotificationManager manager = getSystemService(NotificationManager.class);

@@ -19,7 +19,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import com.example.sensorstreamerwearos.databinding.ActivityMainBinding;
-import com.example.sensorstreamerwearos.service.HeartRateForegroundService;
+import com.example.sensorstreamerwearos.service.SensorForegroundService;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -30,7 +30,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String DEFAULT_IP = "192.168.68.54";
     
     private ActivityMainBinding binding;
-    private HeartRateForegroundService mService;
+    private SensorForegroundService mService;
     private boolean mBound = false;
     private Button toggleButton;
     private boolean isRunning = false;
@@ -38,7 +38,7 @@ public class MainActivity extends AppCompatActivity {
     private final ServiceConnection connection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName className, IBinder service) {
-            HeartRateForegroundService.LocalBinder binder = (HeartRateForegroundService.LocalBinder) service;
+            SensorForegroundService.LocalBinder binder = (SensorForegroundService.LocalBinder) service;
             mService = binder.getService();
             mBound = true;
             updateUI(mService.isRunning());
@@ -89,7 +89,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
-        Intent intent = new Intent(this, HeartRateForegroundService.class);
+        Intent intent = new Intent(this, SensorForegroundService.class);
         bindService(intent, connection, Context.BIND_AUTO_CREATE);
     }
 
@@ -111,7 +111,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startStreaming() {
-        Intent intent = new Intent(this, HeartRateForegroundService.class);
+        Intent intent = new Intent(this, SensorForegroundService.class);
         intent.setAction("START");
         intent.putExtra("IP", DEFAULT_IP);
         startService(intent);
@@ -119,7 +119,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void stopStreaming() {
-        Intent intent = new Intent(this, HeartRateForegroundService.class);
+        Intent intent = new Intent(this, SensorForegroundService.class);
         intent.setAction("STOP");
         startService(intent);
         updateUI(false);
@@ -180,6 +180,9 @@ public class MainActivity extends AppCompatActivity {
 
         if (!permissions.isEmpty()) {
             requestPermissionLauncher.launch(permissions.toArray(new String[0]));
+        } else {
+            // Permissions already granted, start streaming automatically
+            startStreaming();
         }
     }
 }

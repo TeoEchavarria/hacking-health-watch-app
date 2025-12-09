@@ -37,6 +37,9 @@ class WatchReceiverService : WearableListenerService() {
                 } else if (path == "/pong") {
                     Log.d(TAG, "🏓 PONG received from phone!")
                     com.example.sensorstreamerwearos.network.ConnectionManager.setVerified()
+                } else if (path == "/handshake_ack") {
+                    Log.d(TAG, "✅ Handshake ACK received from phone! Connection Verified.")
+                    com.example.sensorstreamerwearos.network.ConnectionManager.setVerified()
                 }
             }
         }
