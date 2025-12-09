@@ -58,6 +58,12 @@
         </service>
 
         <service
+            android:name=".service.SensorForegroundService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="health" />
+
+        <service
             android:name=".service.HeartRateForegroundService"
             android:exported="false"
             android:foregroundServiceType="health" />

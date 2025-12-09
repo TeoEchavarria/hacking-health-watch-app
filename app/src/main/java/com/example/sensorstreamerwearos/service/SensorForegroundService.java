@@ -36,8 +36,8 @@ public class SensorForegroundService extends LifecycleService implements Connect
     private static final String CHANNEL_ID = "SensorServiceChannel";
     private static final int NOTIFICATION_ID = 101;
     
-    // 3 minutes in milliseconds
-    private static final long BATCH_INTERVAL_MS = 180000;
+    // 10 seconds for DEV testing (change to 180000 for production)
+    private static final long BATCH_INTERVAL_MS = 10000;
 
     private HealthServicesManager healthServicesManager;
     private WatchDataSender watchDataSender;
