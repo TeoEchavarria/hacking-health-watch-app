@@ -8,6 +8,9 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.datastore.core.DataStore
@@ -51,6 +54,7 @@ class WorkoutService : LifecycleService() {
         private const val TAG = "WorkoutService"
         private const val WORKOUT_PROTOCOL_TAG = "WorkoutProtocol"
         private const val WORKOUT_UI_TAG = "WorkoutUI"
+        private const val WORKOUT_HAPTICS_TAG = "WorkoutHaptics"
         private const val NOTIFICATION_CHANNEL_ID = "workout_service_channel"
         private const val NOTIFICATION_ID = 2001
         private const val WORKOUT_ACK_PATH = "/workout/ack"
@@ -63,6 +67,7 @@ class WorkoutService : LifecycleService() {
         const val ACTION_PAUSE = "com.example.sensorstreamerwearos.workout.ACTION_PAUSE"
         const val ACTION_RESUME = "com.example.sensorstreamerwearos.workout.ACTION_RESUME"
         const val ACTION_STOP = "com.example.sensorstreamerwearos.workout.ACTION_STOP"
+        const val ACTION_EXTEND_REST = "com.example.sensorstreamerwearos.workout.ACTION_EXTEND_REST"
 
         private val PENDING_PAYLOAD_KEY = stringPreferencesKey("pending_payload")
         private val json = Json { ignoreUnknownKeys = true }
@@ -110,7 +115,8 @@ class WorkoutService : LifecycleService() {
         val workElapsedSec: Int = 0,
         val restRemainingSec: Int = 0,
         val isPaused: Boolean = false,
-        val isFinished: Boolean = false
+        val isFinished: Boolean = false,
+        val progress: Float = 0f
     )
 
     fun isWorkoutActive(): Boolean = mode != Mode.IDLE && !_uiState.value.isFinished
@@ -134,6 +140,7 @@ class WorkoutService : LifecycleService() {
             ACTION_PAUSE -> handlePause()
             ACTION_RESUME -> handleResume()
             ACTION_STOP -> handleStop()
+            ACTION_EXTEND_REST -> handleExtendRest()
             else -> Log.d(TAG, "Unknown action=${intent.action}")
         }
         return START_STICKY
@@ -189,6 +196,7 @@ class WorkoutService : LifecycleService() {
         updateUiFromState()
         startTickJob()
         updateNotification()
+        vibrateStart()
 
         Log.i(WORKOUT_UI_TAG, "WorkoutService started")
         Log.i(WORKOUT_PROTOCOL_TAG, "WorkoutService STARTED sessionId=${finalPayload.sessionId} blocks=${finalPayload.blocks.size}")
@@ -221,6 +229,7 @@ class WorkoutService : LifecycleService() {
         sourceNodeId?.let { nid ->
             serviceScope.launch { sendEvent(nid, "DONE_SET", blk.blockId, setIndex) }
         }
+        vibrateDone()
 
         val restSec = blk.restSec
         if (restSec <= 0) {
@@ -235,6 +244,12 @@ class WorkoutService : LifecycleService() {
     private fun handleSkipRest() {
         if (mode != Mode.REST) return
         advanceSetOrBlock()
+    }
+
+    private fun handleExtendRest() {
+        if (mode != Mode.REST) return
+        restRemainingSec += 10
+        updateUiFromState()
     }
 
     private fun handlePause() {
@@ -298,6 +313,19 @@ class WorkoutService : LifecycleService() {
 
     private fun updateUiFromState() {
         val blk = currentBlock()
+        val progress = when (mode) {
+            Mode.REST -> {
+                if (blk != null && blk.restSec > 0) {
+                    restRemainingSec.toFloat() / blk.restSec.toFloat()
+                } else 0f
+            }
+            Mode.WORK -> {
+                // Visual progress: fills up over 60 seconds
+                (workElapsedSec % 60) / 60f
+            }
+            else -> 0f
+        }
+
         _uiState.value = WorkoutUiState(
             routineName = payload?.routineName ?: "",
             exerciseName = blk?.exerciseName ?: "",
@@ -309,7 +337,8 @@ class WorkoutService : LifecycleService() {
             workElapsedSec = workElapsedSec,
             restRemainingSec = restRemainingSec,
             isPaused = isPaused,
-            isFinished = false
+            isFinished = false,
+            progress = progress
         )
     }
 
@@ -325,6 +354,7 @@ class WorkoutService : LifecycleService() {
                     restRemainingSec--
                     if (restRemainingSec <= 0) {
                         restRemainingSec = 0
+                        vibrateRestFinished()
                         handleSkipRest()
                         continue
                     }
@@ -397,6 +427,39 @@ class WorkoutService : LifecycleService() {
         return TaskStackBuilder.create(this).run {
             addNextIntentWithParentStack(intent)
             getPendingIntent(1, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        }
+    }
+
+    private fun getVibrator(): Vibrator? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }
+    }
+
+    private fun vibrateStart() {
+        val vibrator = getVibrator() ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && vibrator.hasVibrator()) {
+            vibrator.vibrate(VibrationEffect.createOneShot(80, VibrationEffect.DEFAULT_AMPLITUDE))
+            Log.i(WORKOUT_HAPTICS_TAG, "Vibrate: workout started")
+        }
+    }
+
+    private fun vibrateDone() {
+        val vibrator = getVibrator() ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && vibrator.hasVibrator()) {
+            vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 80, 80, 80), intArrayOf(0, 255, 0, 255), -1))
+            Log.i(WORKOUT_HAPTICS_TAG, "Vibrate: set done")
+        }
+    }
+
+    private fun vibrateRestFinished() {
+        val vibrator = getVibrator() ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && vibrator.hasVibrator()) {
+            vibrator.vibrate(VibrationEffect.createOneShot(300, VibrationEffect.DEFAULT_AMPLITUDE))
+            Log.i(WORKOUT_HAPTICS_TAG, "Vibrate: rest finished")
         }
     }
 
