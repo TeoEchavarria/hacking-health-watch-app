@@ -1,8 +1,6 @@
 package com.example.sensorstreamerwearos;
 
 import android.Manifest;
-import android.animation.AnimatorSet;
-import android.animation.ObjectAnimator;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -11,42 +9,53 @@ import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.util.Log;
-import android.view.animation.AccelerateDecelerateInterpolator;
-import android.widget.Button;
 import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
-import com.example.sensorstreamerwearos.databinding.ActivityMainBinding;
-import com.example.sensorstreamerwearos.service.SensorForegroundService;
+import com.example.sensorstreamerwearos.workout.service.WorkoutService;
+import com.example.sensorstreamerwearos.workout.ui.WorkoutTimerActivity;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Redirect-only activity. Never renders UI.
+ * If workout is active -> WorkoutTimerActivity. Otherwise -> finish.
+ */
 public class MainActivity extends AppCompatActivity {
 
-    private static final String TAG = "MainActivity";
-    private static final String DEFAULT_IP = "192.168.68.54";
-    
-    private ActivityMainBinding binding;
-    private SensorForegroundService mService;
-    private boolean mBound = false;
-    private Button toggleButton;
-    private boolean isRunning = false;
+    private static final String TAG = "WorkoutUI";
 
-    private final ServiceConnection connection = new ServiceConnection() {
+    private boolean mWorkoutBound = false;
+    private final ServiceConnection workoutServiceConnection = new ServiceConnection() {
         @Override
-        public void onServiceConnected(ComponentName className, IBinder service) {
-            SensorForegroundService.LocalBinder binder = (SensorForegroundService.LocalBinder) service;
-            mService = binder.getService();
-            mBound = true;
-            updateUI(mService.isRunning());
+        public void onServiceConnected(ComponentName name, IBinder service) {
+            WorkoutService.LocalBinder binder = (WorkoutService.LocalBinder) service;
+            WorkoutService workoutService = binder.getService();
+            if (workoutService.isWorkoutActive()) {
+                Log.i(TAG, "MainActivity redirecting to WorkoutTimerActivity (workout active)");
+                Intent intent = new Intent(MainActivity.this, WorkoutTimerActivity.class);
+                String sessionId = workoutService.getActiveSessionId();
+                if (sessionId != null) {
+                    intent.putExtra("sessionId", sessionId);
+                }
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(intent);
+            } else {
+                Toast.makeText(MainActivity.this, "Start workout from phone", Toast.LENGTH_SHORT).show();
+            }
+            try {
+                unbindService(this);
+            } catch (IllegalArgumentException ignored) {}
+            mWorkoutBound = false;
+            finish();
         }
 
         @Override
-        public void onServiceDisconnected(ComponentName arg0) {
-            mBound = false;
+        public void onServiceDisconnected(ComponentName name) {
+            mWorkoutBound = false;
         }
     };
 
@@ -54,7 +63,7 @@ public class MainActivity extends AppCompatActivity {
             registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), isGranted -> {
                 boolean allGranted = true;
                 for (Map.Entry<String, Boolean> entry : isGranted.entrySet()) {
-                    if (!entry.getValue()) {
+                    if (!Boolean.TRUE.equals(entry.getValue())) {
                         allGranted = false;
                         break;
                     }
@@ -62,108 +71,15 @@ public class MainActivity extends AppCompatActivity {
                 if (allGranted) {
                     Log.d(TAG, "Permissions granted");
                 } else {
-                    Toast.makeText(this, "Permissions required for sensor data", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Permissions required", Toast.LENGTH_SHORT).show();
                 }
+                performRedirect();
             });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        binding = ActivityMainBinding.inflate(getLayoutInflater());
-        setContentView(binding.getRoot());
-
-        toggleButton = binding.toggleButton;
-        toggleButton.setOnClickListener(v -> {
-            animateButtonPress();
-            toggleStreaming();
-        });
-
-        binding.pingButton.setOnClickListener(v -> {
-            new com.example.sensorstreamerwearos.network.WatchDataSender(this).sendPing();
-            Toast.makeText(this, "Ping sent", Toast.LENGTH_SHORT).show();
-        });
-
         checkPermissions();
-    }
-
-    @Override
-    protected void onStart() {
-        super.onStart();
-        Intent intent = new Intent(this, SensorForegroundService.class);
-        bindService(intent, connection, Context.BIND_AUTO_CREATE);
-    }
-
-    @Override
-    protected void onStop() {
-        super.onStop();
-        if (mBound) {
-            unbindService(connection);
-            mBound = false;
-        }
-    }
-
-    private void toggleStreaming() {
-        if (isRunning) {
-            stopStreaming();
-        } else {
-            startStreaming();
-        }
-    }
-
-    private void startStreaming() {
-        Intent intent = new Intent(this, SensorForegroundService.class);
-        intent.setAction("START");
-        intent.putExtra("IP", DEFAULT_IP);
-        startService(intent);
-        updateUI(true);
-    }
-
-    private void stopStreaming() {
-        Intent intent = new Intent(this, SensorForegroundService.class);
-        intent.setAction("STOP");
-        startService(intent);
-        updateUI(false);
-    }
-
-    private void updateUI(boolean running) {
-        isRunning = running;
-        if (running) {
-            // Stop state
-            toggleButton.setText("Stop");
-            toggleButton.setBackgroundResource(R.drawable.button_stop);
-        } else {
-            // Start state
-            toggleButton.setText("Start");
-            toggleButton.setBackgroundResource(R.drawable.button_start);
-        }
-    }
-
-    private void animateButtonPress() {
-        // Scale down animation
-        ObjectAnimator scaleDownX = ObjectAnimator.ofFloat(toggleButton, "scaleX", 0.92f);
-        ObjectAnimator scaleDownY = ObjectAnimator.ofFloat(toggleButton, "scaleY", 0.92f);
-        scaleDownX.setDuration(100);
-        scaleDownY.setDuration(100);
-
-        // Scale up animation
-        ObjectAnimator scaleUpX = ObjectAnimator.ofFloat(toggleButton, "scaleX", 1.0f);
-        ObjectAnimator scaleUpY = ObjectAnimator.ofFloat(toggleButton, "scaleY", 1.0f);
-        scaleUpX.setDuration(100);
-        scaleUpY.setDuration(100);
-
-        // Create animation set
-        AnimatorSet scaleDown = new AnimatorSet();
-        scaleDown.play(scaleDownX).with(scaleDownY);
-        scaleDown.setInterpolator(new AccelerateDecelerateInterpolator());
-
-        AnimatorSet scaleUp = new AnimatorSet();
-        scaleUp.play(scaleUpX).with(scaleUpY);
-        scaleUp.setInterpolator(new AccelerateDecelerateInterpolator());
-
-        // Play animations sequentially
-        AnimatorSet animatorSet = new AnimatorSet();
-        animatorSet.play(scaleDown).before(scaleUp);
-        animatorSet.start();
     }
 
     private void checkPermissions() {
@@ -179,10 +95,31 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (!permissions.isEmpty()) {
+            Log.d(TAG, "Requesting permissions: " + permissions);
             requestPermissionLauncher.launch(permissions.toArray(new String[0]));
         } else {
-            // Permissions already granted, start streaming automatically
-            startStreaming();
+            performRedirect();
         }
+    }
+
+    private void performRedirect() {
+        Intent workoutIntent = new Intent(this, WorkoutService.class);
+        if (bindService(workoutIntent, workoutServiceConnection, Context.BIND_AUTO_CREATE)) {
+            mWorkoutBound = true;
+        } else {
+            Toast.makeText(this, "Start workout from phone", Toast.LENGTH_SHORT).show();
+            finish();
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        if (mWorkoutBound) {
+            try {
+                unbindService(workoutServiceConnection);
+            } catch (IllegalArgumentException ignored) {}
+            mWorkoutBound = false;
+        }
+        super.onStop();
     }
 }

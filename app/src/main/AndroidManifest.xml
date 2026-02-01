@@ -57,6 +57,29 @@
             </intent-filter>
         </service>
 
+        <!-- Workout message receiver service -->
+        <service
+            android:name=".workout.WorkoutMessageReceiverService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/workout/push" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/workout/start" />
+            </intent-filter>
+        </service>
+
+        <!-- Workout foreground service -->
+        <service
+            android:name=".workout.service.WorkoutService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="health" />
+
+        <!-- Workout notification action receiver -->
+        <receiver
+            android:name=".workout.WorkoutNotificationActionReceiver"
+            android:exported="false" />
+
         <service
             android:name=".service.SensorForegroundService"
             android:enabled="true"
@@ -70,13 +93,19 @@
 
         <activity
             android:name="com.example.sensorstreamerwearos.MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:theme="@style/RedirectTheme">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".workout.ui.WorkoutTimerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.WorkoutTimer" />
     </application>
 
 </manifest>

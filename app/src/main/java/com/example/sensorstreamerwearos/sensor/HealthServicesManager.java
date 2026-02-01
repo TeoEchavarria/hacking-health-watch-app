@@ -44,7 +44,7 @@ public class HealthServicesManager implements SensorEventListener {
             return;
         }
 
-        Log.d(TAG, "Starting Accelerometer monitoring");
+        Log.i(TAG, "=== Starting Accelerometer monitoring ===");
         // SENSOR_DELAY_NORMAL = ~200ms (~5Hz), SENSOR_DELAY_GAME = ~20ms (~50Hz)
         // Using NORMAL for battery efficiency - still gives us ~5 samples/second
         sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
@@ -68,7 +68,7 @@ public class HealthServicesManager implements SensorEventListener {
                 float y = event.values[1];
                 float z = event.values[2];
                 
-                Log.d(TAG, "WATCH_ACCEL_SAMPLE_CREATED: x=" + x + ", y=" + y + ", z=" + z);
+                Log.i(TAG, "WATCH_ACCEL_SAMPLE: x=" + String.format("%.2f", x) + ", y=" + String.format("%.2f", y) + ", z=" + String.format("%.2f", z));
                 
                 if (listener != null) {
                     listener.onSensorData(new SensorData(deviceId, "accel", currentTime, new float[]{x, y, z}));

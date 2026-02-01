@@ -12,6 +12,7 @@ plugins {
 android {
     namespace 'com.example.sensorstreamerwearos'
     compileSdk 34
+    buildToolsVersion "34.0.0"
 
     defaultConfig {
         applicationId "com.samsung.android.health.sdk.sample.healthdiary"
@@ -89,4 +90,13 @@ dependencies {
     implementation "androidx.room:room-runtime:2.6.1"
     implementation "androidx.room:room-ktx:2.6.1"
     kapt "androidx.room:room-compiler:2.6.1"
+    
+    // DataStore
+    implementation "androidx.datastore:datastore-preferences:1.0.0"
+    
+    // Wear Ongoing Activity
+    implementation "androidx.wear:wear-ongoing:1.0.0"
+    
+    // Gson for JSON parsing
+    implementation "com.google.code.gson:gson:2.11.0"
 }

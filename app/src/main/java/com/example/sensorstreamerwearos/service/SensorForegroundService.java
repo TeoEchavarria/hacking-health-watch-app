@@ -36,8 +36,8 @@ public class SensorForegroundService extends LifecycleService implements Connect
     private static final String CHANNEL_ID = "SensorServiceChannel";
     private static final int NOTIFICATION_ID = 101;
     
-    // 10 seconds for DEV testing (change to 180000 for production)
-    private static final long BATCH_INTERVAL_MS = 10000;
+    // 1 minute for testing (change to 300000 for production = 5 min)
+    private static final long BATCH_INTERVAL_MS = 60000;
 
     private HealthServicesManager healthServicesManager;
     private WatchDataSender watchDataSender;
@@ -61,7 +61,7 @@ public class SensorForegroundService extends LifecycleService implements Connect
     @Override
     public void onCreate() {
         super.onCreate();
-        Log.d(TAG, "WATCH_SERVICE_STARTED");
+        Log.i(TAG, "=== WATCH_SERVICE_CREATED ===");
         
         PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SensorStreamer::BatchWakeLock");
@@ -78,10 +78,10 @@ public class SensorForegroundService extends LifecycleService implements Connect
              if (shouldBeRunning) {
                  synchronized (dataBuffer) {
                      dataBuffer.add(data);
-                 }
-                 if (!ConnectionManager.INSTANCE.isVerified()) {
-                     // Check if verified state is stale or lost
-                     // We keep collecting but maybe try to ping?
+                     // Log every 10th sample to avoid spam
+                     if (dataBuffer.size() % 10 == 0) {
+                         Log.i(TAG, "WATCH_BUFFER_SIZE: " + dataBuffer.size() + " samples");
+                     }
                  }
              }
         });
@@ -92,6 +92,7 @@ public class SensorForegroundService extends LifecycleService implements Connect
         batchRunnable = new Runnable() {
             @Override
             public void run() {
+                Log.i(TAG, "=== BATCH_TIMER_FIRED ===");
                 acquireWakeLock();
                 try {
                     sendBatchData();
@@ -196,9 +197,12 @@ public class SensorForegroundService extends LifecycleService implements Connect
     }
 
     private void startService() {
-        if (isRunning) return;
+        if (isRunning) {
+            Log.d(TAG, "Service already running, skipping start");
+            return;
+        }
         
-        Log.d(TAG, "Starting Sensor Service");
+        Log.i(TAG, "=== STARTING SENSOR SERVICE ===");
         shouldBeRunning = true;
         createNotificationChannel();
         
@@ -221,18 +225,18 @@ public class SensorForegroundService extends LifecycleService implements Connect
 
         startAccelerometerMonitoring();
         
-        // Start batch timer
+        // Start batch timer - first batch after BATCH_INTERVAL_MS
         batchHandler.removeCallbacks(batchRunnable);
         batchHandler.postDelayed(batchRunnable, BATCH_INTERVAL_MS);
+        Log.i(TAG, "Batch timer scheduled for " + (BATCH_INTERVAL_MS / 1000) + " seconds");
         
         // Initial handshake check
-        if (!ConnectionManager.INSTANCE.isVerified()) {
-            Log.d(TAG, "Service started but not verified. Sending Ping...");
-            watchDataSender.sendPing();
-            ConnectionManager.INSTANCE.setVerifying();
-        }
+        Log.i(TAG, "Sending initial PING to phone...");
+        watchDataSender.sendPing();
+        ConnectionManager.INSTANCE.setVerifying();
         
         isRunning = true;
+        Log.i(TAG, "=== SENSOR SERVICE STARTED SUCCESSFULLY ===");
     }
 
     private void stopService() {
@@ -248,13 +252,14 @@ public class SensorForegroundService extends LifecycleService implements Connect
     }
     
     private void sendBatchData() {
-        Log.d(TAG, "WATCH_ACCEL_BATCH_ATTEMPT");
+        Log.i(TAG, "=== WATCH_ACCEL_BATCH_ATTEMPT ===");
         
         List<SensorData> dataToSend;
         
         synchronized (dataBuffer) {
+            Log.i(TAG, "Buffer contains " + dataBuffer.size() + " samples");
             if (dataBuffer.isEmpty()) {
-                Log.d(TAG, "No data to send");
+                Log.d(TAG, "No data to send - buffer is empty");
                 return;
             }
             
@@ -263,12 +268,12 @@ public class SensorForegroundService extends LifecycleService implements Connect
             dataBuffer.clear();
         }
         
-        Log.d(TAG, "Sending batch of " + dataToSend.size() + " samples");
+        Log.i(TAG, "=== SENDING BATCH: " + dataToSend.size() + " samples ===");
         watchDataSender.sendBatch(dataToSend);
     }
     
     private void startAccelerometerMonitoring() {
-        Log.d(TAG, "WATCH_SENSOR_ACTIVE");
+        Log.i(TAG, "WATCH_SENSOR_ACTIVE");
         healthServicesManager.startAccelerometerMonitoring();
     }
 
