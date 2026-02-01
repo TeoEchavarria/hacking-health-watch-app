@@ -23,11 +23,12 @@ class CircularTimerView @JvmOverloads constructor(
 
     init {
         // Defaults
-        strokeWidthPx = 16f * resources.displayMetrics.density // Thick stroke
+        strokeWidthPx = 6f * resources.displayMetrics.density // Thinner elegant stroke
+        val bgStrokeWidthPx = 4f * resources.displayMetrics.density // Even thinner background
         
         paintBackground.style = Paint.Style.STROKE
-        paintBackground.strokeWidth = strokeWidthPx
-        paintBackground.color = Color.parseColor("#33FFFFFF") // Subtle gray
+        paintBackground.strokeWidth = bgStrokeWidthPx
+        paintBackground.color = Color.parseColor("#1AFFFFFF") // Even more subtle gray (10% opacity)
         paintBackground.strokeCap = Paint.Cap.ROUND
 
         paintForeground.style = Paint.Style.STROKE

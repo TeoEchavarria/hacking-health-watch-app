@@ -158,6 +158,14 @@ class WorkoutTimerActivity : AppCompatActivity() {
                 val exerciseName = state.exerciseName.ifBlank { "—" }
 
                 binding.exerciseLabel.text = exerciseName
+                
+                if (state.totalSets > 1) {
+                    binding.setCounter.text = "${state.setIndex} / ${state.totalSets}"
+                    binding.setCounter.visibility = View.VISIBLE
+                } else {
+                    binding.setCounter.visibility = View.GONE
+                }
+
                 binding.progressRing.setProgress(state.progress)
 
                 val ringColor = when (state.mode) {
