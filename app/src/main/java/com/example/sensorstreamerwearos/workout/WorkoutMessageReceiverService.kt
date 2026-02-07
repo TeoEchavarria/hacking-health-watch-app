@@ -11,17 +11,19 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import com.example.sensorstreamerwearos.data.WorkoutDataStoreProvider
 import com.example.sensorstreamerwearos.R
 import com.example.sensorstreamerwearos.workout.model.Routine
 import com.example.sensorstreamerwearos.workout.model.RoutinePayload
+import com.example.sensorstreamerwearos.workout.model.WorkoutAckPayload
+import com.example.sensorstreamerwearos.workout.model.WorkoutEventPayload
+import com.example.sensorstreamerwearos.workout.model.WorkoutStatePayload
+import com.example.sensorstreamerwearos.workout.model.WorkoutStateRequestPayload
 import com.example.sensorstreamerwearos.workout.service.WorkoutService
 import com.example.sensorstreamerwearos.workout.ui.WorkoutTimerActivity
 import com.google.android.gms.wearable.MessageEvent
+import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
 import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
@@ -30,6 +32,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 
 /**
@@ -44,19 +48,17 @@ class WorkoutMessageReceiverService : WearableListenerService() {
         private const val WORKOUT_WATCH_TAG = "WorkoutWatch"
         const val MESSAGE_PATH_PUSH = "/workout/push"
         const val MESSAGE_PATH_START = "/workout/start"
+        const val MESSAGE_PATH_STATE_REQUEST = "/workout/state_request"
+        const val MESSAGE_PATH_EVENT = "/workout/event"
         private const val NOTIFICATION_CHANNEL_ID = "workout_channel"
         const val NOTIFICATION_ID = 1001
 
         const val ACTION_START_SESSION = "com.example.sensorstreamerwearos.workout.ACTION_START_SESSION"
         const val ACTION_START_WORKOUT = "com.example.sensorstreamerwearos.workout.ACTION_START_WORKOUT"
 
-        private val PENDING_ROUTINE_KEY = stringPreferencesKey("pending_routine")
-        private val PENDING_PAYLOAD_KEY = stringPreferencesKey("pending_payload")
-
+        private const val WORKOUT_ACK_PATH = "/workout/ack"
         private val json = Json { ignoreUnknownKeys = true }
     }
-
-    private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "workout_prefs")
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -73,13 +75,32 @@ class WorkoutMessageReceiverService : WearableListenerService() {
         when (messageEvent.path) {
             MESSAGE_PATH_START -> handleWorkoutStart(messageEvent)
             MESSAGE_PATH_PUSH -> handleWorkoutPush(messageEvent)
+            MESSAGE_PATH_STATE_REQUEST -> handleStateRequest(messageEvent)
+            MESSAGE_PATH_EVENT -> handleWorkoutEvent(messageEvent)
             else -> { }
+        }
+    }
+
+    private fun handleWorkoutEvent(messageEvent: MessageEvent) {
+        val activeSessionId = runBlocking { WorkoutDataStoreProvider.getActiveSessionId(applicationContext) }
+        if (activeSessionId == null) return
+
+        try {
+            val jsonPayload = String(messageEvent.data, Charsets.UTF_8)
+            val serviceIntent = Intent(this, WorkoutService::class.java).apply {
+                action = WorkoutService.ACTION_REMOTE_EVENT
+                putExtra("payloadJson", jsonPayload)
+                putExtra("sourceNodeId", messageEvent.sourceNodeId)
+            }
+            startService(serviceIntent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to handle workout event", e)
         }
     }
 
     /**
      * Handle /workout/start: parse RoutinePayload, persist keyed by sessionId, start WorkoutService
-     * with ACTION_START_SESSION. ACK is sent only from WorkoutService.
+     * with ACTION_START_SESSION. Reject if a session is already active.
      */
     private fun handleWorkoutStart(messageEvent: MessageEvent) {
         val sourceNodeId = messageEvent.sourceNodeId
@@ -89,9 +110,18 @@ class WorkoutMessageReceiverService : WearableListenerService() {
             Log.i(WORKOUT_WATCH_TAG, "RX start workout")
             Log.i(WORKOUT_PROTOCOL_TAG, "RX /workout/start sessionId=${payload.sessionId} blocks=${payload.blocks.size}")
 
+            val activeSessionId = runBlocking { WorkoutDataStoreProvider.getActiveSessionId(applicationContext) }
+            if (activeSessionId != null && activeSessionId != payload.sessionId) {
+                Log.i(WORKOUT_PROTOCOL_TAG, "Session already active=$activeSessionId, rejecting start")
+                serviceScope.launch {
+                    sendAck(sourceNodeId, payload.sessionId, payload.routineId, "REJECTED", "SESSION_ALREADY_ACTIVE")
+                }
+                return
+            }
+
             serviceScope.launch {
-                dataStore.edit { prefs ->
-                    prefs[PENDING_PAYLOAD_KEY] = jsonPayload
+                WorkoutDataStoreProvider.getDataStore(applicationContext).edit { prefs ->
+                    prefs[WorkoutDataStoreProvider.PENDING_PAYLOAD_KEY] = jsonPayload
                 }
 
                 val serviceIntent = Intent(this@WorkoutMessageReceiverService, WorkoutService::class.java).apply {
@@ -109,6 +139,24 @@ class WorkoutMessageReceiverService : WearableListenerService() {
             }
         } catch (e: Exception) {
             Log.e(WORKOUT_PROTOCOL_TAG, "Failed to handle workout start", e)
+        }
+    }
+
+    private suspend fun sendAck(nodeId: String, sessionId: String, routineId: String, status: String, reason: String?) {
+        withContext(Dispatchers.IO) {
+            try {
+                val payload = WorkoutAckPayload(
+                    sessionId = sessionId,
+                    routineId = routineId,
+                    status = status,
+                    reason = reason,
+                    at = java.time.Instant.now().toString()
+                )
+                val bytes = json.encodeToString(WorkoutAckPayload.serializer(), payload).toByteArray(Charsets.UTF_8)
+                Wearable.getMessageClient(applicationContext).sendMessage(nodeId, WORKOUT_ACK_PATH, bytes).await()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send ACK", e)
+            }
         }
     }
 
@@ -146,13 +194,63 @@ class WorkoutMessageReceiverService : WearableListenerService() {
         notificationManager.notify(NOTIFICATION_ID, notification)
     }
 
+    /**
+     * Handle /workout/state_request: forward to WorkoutService if running,
+     * otherwise send IDLE/FINISHED state to phone.
+     */
+    private fun handleStateRequest(messageEvent: MessageEvent) {
+        val sourceNodeId = messageEvent.sourceNodeId
+        val sessionId = try {
+            val jsonStr = String(messageEvent.data, Charsets.UTF_8)
+            json.decodeFromString<WorkoutStateRequestPayload>(jsonStr).sessionId
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse state_request payload", e)
+            ""
+        }
+        val activeSessionId = runBlocking { WorkoutDataStoreProvider.getActiveSessionId(applicationContext) }
+        if (activeSessionId != null) {
+            val serviceIntent = Intent(this, WorkoutService::class.java).apply {
+                action = WorkoutService.ACTION_STATE_REQUEST
+                putExtra("sourceNodeId", sourceNodeId)
+                putExtra("sessionId", sessionId)
+            }
+            startService(serviceIntent)
+        } else {
+            serviceScope.launch {
+                sendIdleState(sourceNodeId, sessionId)
+            }
+        }
+    }
+
+    private suspend fun sendIdleState(nodeId: String, requestSessionId: String) {
+        withContext(Dispatchers.IO) {
+            try {
+                val payload = WorkoutStatePayload(
+                    sessionId = requestSessionId.ifBlank { "none" },
+                    routineId = "",
+                    exerciseName = "",
+                    currentSet = 0,
+                    totalSets = 0,
+                    mode = "FINISHED",
+                    progress = 0f,
+                    updatedAt = java.time.Instant.now().toString()
+                )
+                val bytes = json.encodeToString(WorkoutStatePayload.serializer(), payload).toByteArray(Charsets.UTF_8)
+                Wearable.getMessageClient(applicationContext).sendMessage(nodeId, "/workout/state", bytes).await()
+                Log.i(WORKOUT_PROTOCOL_TAG, "State request: service not running, sent FINISHED")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send idle state", e)
+            }
+        }
+    }
+
     private fun handleWorkoutPush(messageEvent: MessageEvent) {
         try {
             val jsonPayload = String(messageEvent.data, Charsets.UTF_8)
             val routine = Gson().fromJson(jsonPayload, Routine::class.java)
             serviceScope.launch {
-                dataStore.edit { prefs ->
-                    prefs[PENDING_ROUTINE_KEY] = jsonPayload
+                WorkoutDataStoreProvider.getDataStore(applicationContext).edit { prefs ->
+                    prefs[WorkoutDataStoreProvider.PENDING_ROUTINE_KEY] = jsonPayload
                 }
             }
             showWorkoutNotification(routine)
@@ -216,7 +314,8 @@ class WorkoutMessageReceiverService : WearableListenerService() {
 
     fun getPendingRoutine(context: Context): Routine? = runBlocking {
         try {
-            val jsonStr = context.dataStore.data.first()[PENDING_ROUTINE_KEY]
+            val prefs = WorkoutDataStoreProvider.getDataStore(context).data.first()
+            val jsonStr = prefs[WorkoutDataStoreProvider.PENDING_ROUTINE_KEY]
             jsonStr?.let { Gson().fromJson(it, Routine::class.java) }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load pending routine", e)
@@ -226,7 +325,7 @@ class WorkoutMessageReceiverService : WearableListenerService() {
 
     fun clearPendingRoutine(context: Context) {
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            context.dataStore.edit { it.remove(PENDING_ROUTINE_KEY) }
+            WorkoutDataStoreProvider.getDataStore(context).edit { it.remove(WorkoutDataStoreProvider.PENDING_ROUTINE_KEY) }
         }
     }
 }

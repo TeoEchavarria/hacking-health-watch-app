@@ -13,10 +13,7 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import com.example.sensorstreamerwearos.data.WorkoutDataStoreProvider
 import androidx.lifecycle.LifecycleService
 import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
@@ -26,6 +23,7 @@ import com.example.sensorstreamerwearos.workout.model.RoutineBlockPayload
 import com.example.sensorstreamerwearos.workout.model.RoutinePayload
 import com.example.sensorstreamerwearos.workout.model.WorkoutAckPayload
 import com.example.sensorstreamerwearos.workout.model.WorkoutEventPayload
+import com.example.sensorstreamerwearos.workout.model.WorkoutStatePayload
 import com.example.sensorstreamerwearos.workout.ui.WorkoutTimerActivity
 import com.google.android.gms.wearable.Wearable
 import kotlinx.coroutines.CoroutineScope
@@ -59,21 +57,22 @@ class WorkoutService : LifecycleService() {
         private const val NOTIFICATION_ID = 2001
         private const val WORKOUT_ACK_PATH = "/workout/ack"
         private const val WORKOUT_EVENT_PATH = "/workout/event"
+        private const val WORKOUT_STATE_PATH = "/workout/state"
+        private const val WORKOUT_SYNC_TAG = "WorkoutSync"
         private const val TICK_INTERVAL_MS = 1000L
 
         const val ACTION_START_SESSION = "com.example.sensorstreamerwearos.workout.ACTION_START_SESSION"
+        const val ACTION_STATE_REQUEST = "com.example.sensorstreamerwearos.workout.ACTION_STATE_REQUEST"
         const val ACTION_DONE_SET = "com.example.sensorstreamerwearos.workout.ACTION_DONE_SET"
         const val ACTION_SKIP_REST = "com.example.sensorstreamerwearos.workout.ACTION_SKIP_REST"
         const val ACTION_PAUSE = "com.example.sensorstreamerwearos.workout.ACTION_PAUSE"
         const val ACTION_RESUME = "com.example.sensorstreamerwearos.workout.ACTION_RESUME"
         const val ACTION_STOP = "com.example.sensorstreamerwearos.workout.ACTION_STOP"
         const val ACTION_EXTEND_REST = "com.example.sensorstreamerwearos.workout.ACTION_EXTEND_REST"
+        const val ACTION_REMOTE_EVENT = "com.example.sensorstreamerwearos.workout.ACTION_REMOTE_EVENT"
 
-        private val PENDING_PAYLOAD_KEY = stringPreferencesKey("pending_payload")
         private val json = Json { ignoreUnknownKeys = true }
     }
-
-    private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "workout_prefs")
 
     inner class LocalBinder : android.os.Binder() {
         fun getService(): WorkoutService = this@WorkoutService
@@ -135,12 +134,14 @@ class WorkoutService : LifecycleService() {
 
         when (intent.action) {
             ACTION_START_SESSION -> handleStartSession(intent)
+            ACTION_STATE_REQUEST -> handleStateRequest(intent)
             ACTION_DONE_SET -> handleDoneSet()
             ACTION_SKIP_REST -> handleSkipRest()
             ACTION_PAUSE -> handlePause()
             ACTION_RESUME -> handleResume()
             ACTION_STOP -> handleStop()
             ACTION_EXTEND_REST -> handleExtendRest()
+            ACTION_REMOTE_EVENT -> handleRemoteEvent(intent)
             else -> Log.d(TAG, "Unknown action=${intent.action}")
         }
         return START_STICKY
@@ -152,6 +153,15 @@ class WorkoutService : LifecycleService() {
         sourceNodeId = intent.getStringExtra("sourceNodeId")
 
         Log.i(WORKOUT_PROTOCOL_TAG, "WorkoutService validating sessionId=$sid")
+
+        val activeSessionId = runBlocking { WorkoutDataStoreProvider.getActiveSessionId(applicationContext) }
+        if (activeSessionId != null && activeSessionId != sid) {
+            Log.i(WORKOUT_SYNC_TAG, "Session locked, rejecting start; active=$activeSessionId")
+            sourceNodeId?.let { nid ->
+                serviceScope.launch { sendAck(nid, sid ?: "", "", "REJECTED", "SESSION_ALREADY_ACTIVE") }
+            }
+            return
+        }
 
         val parsed: RoutinePayload? = if (!payloadJson.isNullOrBlank()) {
             try {
@@ -189,6 +199,8 @@ class WorkoutService : LifecycleService() {
         restRemainingSec = 0
         isPaused = false
 
+        serviceScope.launch { WorkoutDataStoreProvider.setActiveSessionId(applicationContext, sid!!) }
+
         if (_uiState.value.mode == Mode.IDLE) {
             startForeground(NOTIFICATION_ID, createNotificationBuilder("Starting...").build())
         }
@@ -204,8 +216,19 @@ class WorkoutService : LifecycleService() {
         sourceNodeId?.let { nid ->
             serviceScope.launch {
                 sendAck(nid, finalPayload.sessionId, finalPayload.routineId, "STARTED", null)
+                sendState(nid)
                 launchWorkoutTimerActivity()
             }
+        }
+    }
+
+    private fun handleStateRequest(intent: Intent) {
+        val requestNodeId = intent.getStringExtra("sourceNodeId")
+        val requestSessionId = intent.getStringExtra("sessionId")
+        if (requestNodeId.isNullOrBlank()) return
+        if (requestSessionId != null && requestSessionId != sessionId) return
+        serviceScope.launch {
+            sendState(requestNodeId)
         }
     }
 
@@ -238,6 +261,7 @@ class WorkoutService : LifecycleService() {
             mode = Mode.REST
             restRemainingSec = restSec
             updateUiFromState()
+            sourceNodeId?.let { nid -> serviceScope.launch { sendState(nid) } }
         }
     }
 
@@ -250,6 +274,99 @@ class WorkoutService : LifecycleService() {
         if (mode != Mode.REST) return
         restRemainingSec += 10
         updateUiFromState()
+    }
+
+    private fun handleRemoteEvent(intent: Intent) {
+        val payloadJson = intent.getStringExtra("payloadJson") ?: return
+        val payload = try {
+            json.decodeFromString<WorkoutEventPayload>(payloadJson)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse remote event", e)
+            return
+        }
+
+        // Loop prevention
+        if (payload.source == "WATCH") return
+
+        // Session check
+        if (sessionId != null && payload.sessionId != sessionId) {
+            Log.w(WORKOUT_SYNC_TAG, "Ignored event for different session: ${payload.sessionId} vs $sessionId")
+            return
+        }
+
+        when (payload.type) {
+            "DONE_SET" -> {
+                Log.i(WORKOUT_SYNC_TAG, "RX DONE_SET from PHONE set=${payload.setIndex}")
+                if (mode == Mode.IDLE) return
+                
+                val pBlockId = payload.blockId
+                val pSetIndex = payload.setIndex
+                if (pBlockId == null || pSetIndex == null) return
+
+                val blk = currentBlock() ?: return
+                // We only support marking current or next set done linearly for now in this simple service
+                // But let's try to match blockId
+                if (blk.blockId != pBlockId) {
+                    // It might be a previous or future block. 
+                    // For simplicity in this Hevy-like linear player, if phone marks a future set, we might jump?
+                    // Or if phone marks current set.
+                    // Let's strictly check if it matches current pointer.
+                    Log.w(WORKOUT_SYNC_TAG, "Remote set block mismatch: $pBlockId vs ${blk.blockId}")
+                    return
+                }
+
+                if (pSetIndex == setIndex) {
+                    // It's the current set. Mark it done (do not send event back).
+                    vibrateDone()
+                    val restSec = blk.restSec
+                    if (restSec <= 0) {
+                        advanceSetOrBlock()
+                    } else {
+                        mode = Mode.REST
+                        restRemainingSec = restSec
+                        updateUiFromState()
+                        sourceNodeId?.let { nid -> serviceScope.launch { sendState(nid) } }
+                    }
+                } else if (pSetIndex < setIndex) {
+                    // Already done, ignore (idempotent)
+                    Log.d(WORKOUT_SYNC_TAG, "Set $pSetIndex already done (current $setIndex)")
+                } else {
+                    // Catch up: phone marked a future set (or next block). Advance until we're there.
+                    Log.i(WORKOUT_SYNC_TAG, "Catching up to remote: blockId=$pBlockId set=$pSetIndex (current block=${blk.blockId} set=$setIndex)")
+                    var steps = 0
+                    val maxSteps = 50
+                    while (currentBlock()?.blockId != pBlockId || setIndex != pSetIndex) {
+                        if (steps++ >= maxSteps) {
+                            Log.w(WORKOUT_SYNC_TAG, "Catch-up limit reached")
+                            return
+                        }
+                        advanceSetOrBlock()
+                        if (mode == Mode.IDLE) return
+                    }
+                    // Now at the set the phone marked done. Mark it done.
+                    val blk2 = currentBlock() ?: return
+                    vibrateDone()
+                    val restSec2 = blk2.restSec
+                    if (restSec2 <= 0) {
+                        advanceSetOrBlock()
+                    } else {
+                        mode = Mode.REST
+                        restRemainingSec = restSec2
+                        updateUiFromState()
+                        sourceNodeId?.let { nid -> serviceScope.launch { sendState(nid) } }
+                    }
+                }
+            }
+            "UNDO_SET" -> {
+                 // Not fully supported in linear state machine yet, but we can log
+                 Log.i(WORKOUT_SYNC_TAG, "RX UNDO_SET from PHONE - Linear state machine does not support undo yet")
+            }
+            "FINISH_WORKOUT" -> {
+                Log.i(WORKOUT_SYNC_TAG, "RX FINISH_WORKOUT from PHONE")
+                Log.i(WORKOUT_SYNC_TAG, "WorkoutService stopped")
+                finishWorkout()
+            }
+        }
     }
 
     private fun handlePause() {
@@ -270,7 +387,7 @@ class WorkoutService : LifecycleService() {
 
     private fun handleStop() {
         sourceNodeId?.let { nid ->
-            serviceScope.launch { sendEvent(nid, "STOP", currentBlock()?.blockId ?: "", setIndex) }
+            serviceScope.launch { sendEvent(nid, "FINISH_WORKOUT", currentBlock()?.blockId ?: "", setIndex) }
         }
         finishWorkout()
     }
@@ -283,7 +400,7 @@ class WorkoutService : LifecycleService() {
             blockIndex++
             if (blockIndex >= (payload?.blocks?.size ?: 0)) {
                 sourceNodeId?.let { nid ->
-                    serviceScope.launch { sendEvent(nid, "FINISH", blk.blockId, setIndex - 1) }
+                    serviceScope.launch { sendEvent(nid, "FINISH_WORKOUT", blk.blockId, setIndex - 1) }
                 }
                 finishWorkout()
                 return
@@ -294,10 +411,30 @@ class WorkoutService : LifecycleService() {
         restRemainingSec = 0
         updateUiFromState()
         updateNotification()
+        sourceNodeId?.let { nid -> serviceScope.launch { sendState(nid) } }
     }
 
     private fun finishWorkout() {
         timerJob?.cancel()
+        runBlocking { WorkoutDataStoreProvider.clearActiveSessionId(applicationContext) }
+        val blocks = payload?.blocks ?: emptyList()
+        val lastBlk = if (blockIndex > 0) blocks.getOrNull(blockIndex - 1) else blocks.firstOrNull()
+        val totalSets = lastBlk?.sets ?: 0
+        val lastState = WorkoutStatePayload(
+            sessionId = sessionId ?: "",
+            routineId = payload?.routineId ?: "",
+            exerciseName = lastBlk?.exerciseName ?: "",
+            currentSet = totalSets,
+            totalSets = totalSets,
+            mode = "FINISHED",
+            progress = 1f,
+            updatedAt = java.time.Instant.now().toString()
+        )
+        sourceNodeId?.let { nid ->
+            serviceScope.launch {
+                sendStatePayload(nid, lastState)
+            }
+        }
         mode = Mode.IDLE
         _uiState.value = _uiState.value.copy(isFinished = true, mode = Mode.IDLE)
         updateNotification()
@@ -496,19 +633,63 @@ class WorkoutService : LifecycleService() {
                     type = type,
                     blockId = blockId,
                     setIndex = setIdx,
+                    source = "WATCH",
                     at = java.time.Instant.now().toString()
                 )
                 val bytes = json.encodeToString(WorkoutEventPayload.serializer(), payload).toByteArray(Charsets.UTF_8)
                 Wearable.getMessageClient(applicationContext).sendMessage(nodeId, WORKOUT_EVENT_PATH, bytes).await()
+                Log.i(WORKOUT_SYNC_TAG, "TX $type sessionId=${sessionId} blockId=$blockId set=$setIdx")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to send event", e)
             }
         }
     }
 
+    private suspend fun sendState(nodeId: String) {
+        val blk = currentBlock()
+        val modeStr = when (mode) {
+            Mode.WORK -> "WORK"
+            Mode.REST -> "REST"
+            Mode.IDLE -> if (_uiState.value.isFinished) "FINISHED" else "IDLE"
+        }
+        val progress = when (mode) {
+            Mode.REST -> {
+                if (blk != null && blk.restSec > 0) {
+                    1f - (restRemainingSec.toFloat() / blk.restSec.toFloat())
+                } else 0f
+            }
+            Mode.WORK -> (workElapsedSec % 60) / 60f
+            else -> 0f
+        }
+        val payload = WorkoutStatePayload(
+            sessionId = sessionId ?: "",
+            routineId = this.payload?.routineId ?: "",
+            exerciseName = blk?.exerciseName ?: "",
+            currentSet = setIndex + 1,
+            totalSets = blk?.sets ?: 0,
+            mode = modeStr,
+            progress = progress,
+            updatedAt = java.time.Instant.now().toString()
+        )
+        sendStatePayload(nodeId, payload)
+    }
+
+    private suspend fun sendStatePayload(nodeId: String, payload: WorkoutStatePayload) {
+        withContext(Dispatchers.IO) {
+            try {
+                val bytes = json.encodeToString(WorkoutStatePayload.serializer(), payload).toByteArray(Charsets.UTF_8)
+                Wearable.getMessageClient(applicationContext).sendMessage(nodeId, WORKOUT_STATE_PATH, bytes).await()
+                Log.i(WORKOUT_SYNC_TAG, "State sent: sessionId=${payload.sessionId} set=${payload.currentSet}/${payload.totalSets} mode=${payload.mode}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send state", e)
+            }
+        }
+    }
+
     private fun loadPendingPayload(): RoutinePayload? = runBlocking {
         try {
-            val jsonStr = dataStore.data.first()[PENDING_PAYLOAD_KEY]
+            val prefs = WorkoutDataStoreProvider.getDataStore(applicationContext).data.first()
+            val jsonStr = prefs[WorkoutDataStoreProvider.PENDING_PAYLOAD_KEY]
             jsonStr?.let { json.decodeFromString<RoutinePayload>(it) }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load pending payload", e)

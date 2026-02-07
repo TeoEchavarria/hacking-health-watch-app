@@ -39,13 +39,35 @@ data class WorkoutAckPayload(
 )
 
 /**
- * Optional event sent from watch to phone via /workout/event.
+ * Event sent between phone and watch via /workout/event.
  */
 @Serializable
 data class WorkoutEventPayload(
     @SerialName("sessionId") val sessionId: String,
-    @SerialName("type") val type: String, // "DONE_SET" | "SKIP_REST" | "STOP" | "FINISH"
-    @SerialName("blockId") val blockId: String,
-    @SerialName("setIndex") val setIndex: Int,
+    @SerialName("type") val type: String, // "DONE_SET" | "UNDO_SET" | "FINISH_WORKOUT"
+    @SerialName("blockId") val blockId: String?,
+    @SerialName("setIndex") val setIndex: Int?,
+    @SerialName("source") val source: String, // "PHONE" | "WATCH"
     @SerialName("at") val at: String
+)
+
+@Serializable
+data class WorkoutStateRequestPayload(
+    @SerialName("sessionId") val sessionId: String = ""
+)
+
+/**
+ * State snapshot sent from watch to phone via /workout/state.
+ * Phone mirrors this state; watch is source of truth.
+ */
+@Serializable
+data class WorkoutStatePayload(
+    @SerialName("sessionId") val sessionId: String,
+    @SerialName("routineId") val routineId: String,
+    @SerialName("exerciseName") val exerciseName: String,
+    @SerialName("currentSet") val currentSet: Int, // 1-based
+    @SerialName("totalSets") val totalSets: Int,
+    @SerialName("mode") val mode: String, // "WORK", "REST", "FINISHED", "IDLE"
+    @SerialName("progress") val progress: Float,
+    @SerialName("updatedAt") val updatedAt: String
 )
