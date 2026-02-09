@@ -13,13 +13,18 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.datastore.preferences.core.edit
 import com.example.sensorstreamerwearos.data.WorkoutDataStoreProvider
+import com.example.sensorstreamerwearos.BuildConfig
 import com.example.sensorstreamerwearos.R
 import com.example.sensorstreamerwearos.workout.model.Routine
 import com.example.sensorstreamerwearos.workout.model.RoutinePayload
+import com.example.sensorstreamerwearos.workout.model.WorkoutAckMessage
 import com.example.sensorstreamerwearos.workout.model.WorkoutAckPayload
 import com.example.sensorstreamerwearos.workout.model.WorkoutEventPayload
+import com.example.sensorstreamerwearos.workout.model.WorkoutProtocol
+import com.example.sensorstreamerwearos.workout.model.WorkoutStartMessage
 import com.example.sensorstreamerwearos.workout.model.WorkoutStatePayload
 import com.example.sensorstreamerwearos.workout.model.WorkoutStateRequestPayload
+import com.example.sensorstreamerwearos.workout.repository.RoutineRepository
 import com.example.sensorstreamerwearos.workout.service.WorkoutService
 import com.example.sensorstreamerwearos.workout.ui.WorkoutTimerActivity
 import com.google.android.gms.wearable.MessageEvent
@@ -99,46 +104,187 @@ class WorkoutMessageReceiverService : WearableListenerService() {
     }
 
     /**
-     * Handle /workout/start: parse RoutinePayload, persist keyed by sessionId, start WorkoutService
-     * with ACTION_START_SESSION. Reject if a session is already active.
+     * Handle /workout/start: Protocol v2 first (WorkoutStartMessage), then fallback to v1 (RoutinePayload).
+     * Always send ACK (V2 format when possible). Never throw without sending an ACK.
      */
     private fun handleWorkoutStart(messageEvent: MessageEvent) {
         val sourceNodeId = messageEvent.sourceNodeId
-        try {
-            val jsonPayload = String(messageEvent.data, Charsets.UTF_8)
-            val payload = json.decodeFromString<RoutinePayload>(jsonPayload)
-            Log.i(WORKOUT_WATCH_TAG, "RX start workout")
-            Log.i(WORKOUT_PROTOCOL_TAG, "RX /workout/start sessionId=${payload.sessionId} blocks=${payload.blocks.size}")
+        val rawJson = String(messageEvent.data, Charsets.UTF_8)
+        Log.i(TAG, "onMessageReceived path=${messageEvent.path} bytes=${messageEvent.data.size}")
+        if (BuildConfig.DEBUG) {
+            Log.d(WORKOUT_PROTOCOL_TAG, "raw JSON (debug): $rawJson")
+        }
 
-            val activeSessionId = runBlocking { WorkoutDataStoreProvider.getActiveSessionId(applicationContext) }
-            if (activeSessionId != null && activeSessionId != payload.sessionId) {
-                Log.i(WORKOUT_PROTOCOL_TAG, "Session already active=$activeSessionId, rejecting start")
-                serviceScope.launch {
-                    sendAck(sourceNodeId, payload.sessionId, payload.routineId, "REJECTED", "SESSION_ALREADY_ACTIVE")
-                }
-                return
+        // Try V2 decode first
+        val v2Start = try {
+            json.decodeFromString<WorkoutStartMessage>(rawJson)
+        } catch (e: Exception) {
+            Log.e(WORKOUT_PROTOCOL_TAG, "Failed to decode WorkoutStartMessage", e)
+            serviceScope.launch {
+                sendAckV2(
+                    sourceNodeId,
+                    sessionId = "",
+                    attemptId = "",
+                    success = false,
+                    reasonCode = WorkoutProtocol.ReasonCode.INVALID_JSON,
+                    reasonMessage = e.message
+                )
             }
+            return
+        }
 
+        val attemptId = v2Start.attemptId
+        val sessionId = v2Start.sessionId
+        val routineId = v2Start.routineId
+        val routineName = v2Start.routineName
+        val blockId = v2Start.blockId
+        Log.i(WORKOUT_PROTOCOL_TAG, "event=workout_start_rx attemptId=$attemptId sessionId=$sessionId routineId=$routineId blockId=$blockId")
+
+        // Validate required fields
+        if (sessionId.isBlank() || attemptId.isBlank() || routineId.isBlank() || routineName.isBlank()) {
+            Log.w(WORKOUT_PROTOCOL_TAG, "event=invalid_schema attemptId=$attemptId reason=missing_required_fields")
+            serviceScope.launch {
+                sendAckV2(
+                    sourceNodeId,
+                    sessionId,
+                    attemptId,
+                    success = false,
+                    reasonCode = WorkoutProtocol.ReasonCode.INVALID_SCHEMA,
+                    reasonMessage = "sessionId, attemptId, routineId, routineName required"
+                )
+            }
+            return
+        }
+
+        // Session already active?
+        val activeSessionId = runBlocking { WorkoutDataStoreProvider.getActiveSessionId(applicationContext) }
+        if (activeSessionId != null && activeSessionId != sessionId) {
+            Log.i(WORKOUT_PROTOCOL_TAG, "event=reject_session_active attemptId=$attemptId active=$activeSessionId")
+            serviceScope.launch {
+                sendAckV2(
+                    sourceNodeId,
+                    sessionId,
+                    attemptId,
+                    success = false,
+                    reasonCode = "SESSION_ALREADY_ACTIVE",
+                    reasonMessage = activeSessionId
+                )
+            }
+            return
+        }
+
+        // Load routine by routineId
+        val sentAtStr = java.time.Instant.ofEpochMilli(v2Start.sentAt).toString()
+        val payload = try {
+            RoutineRepository.getRoutine(routineId, sessionId, routineName, sentAtStr)
+        } catch (e: Exception) {
+            Log.e(WORKOUT_PROTOCOL_TAG, "event=internal_error attemptId=$attemptId", e)
+            serviceScope.launch {
+                sendAckV2(
+                    sourceNodeId,
+                    sessionId,
+                    attemptId,
+                    success = false,
+                    reasonCode = WorkoutProtocol.ReasonCode.INTERNAL_ERROR,
+                    reasonMessage = e.message
+                )
+            }
+            return
+        }
+
+        if (payload == null) {
+            Log.w(WORKOUT_PROTOCOL_TAG, "event=routine_not_found attemptId=$attemptId routineId=$routineId")
+            serviceScope.launch {
+                sendAckV2(
+                    sourceNodeId,
+                    sessionId,
+                    attemptId,
+                    success = false,
+                    reasonCode = WorkoutProtocol.ReasonCode.ROUTINE_NOT_FOUND,
+                    reasonMessage = routineId
+                )
+            }
+            return
+        }
+
+        // Optional: validate blockId if provided
+        if (!blockId.isNullOrBlank() && !RoutineRepository.hasBlock(routineId, blockId)) {
+            Log.w(WORKOUT_PROTOCOL_TAG, "event=block_not_found attemptId=$attemptId blockId=$blockId")
+            serviceScope.launch {
+                sendAckV2(
+                    sourceNodeId,
+                    sessionId,
+                    attemptId,
+                    success = false,
+                    reasonCode = WorkoutProtocol.ReasonCode.BLOCK_NOT_FOUND,
+                    reasonMessage = blockId
+                )
+            }
+            return
+        }
+
+        try {
+            val payloadJson = json.encodeToString(RoutinePayload.serializer(), payload)
+            
             serviceScope.launch {
                 WorkoutDataStoreProvider.getDataStore(applicationContext).edit { prefs ->
-                    prefs[WorkoutDataStoreProvider.PENDING_PAYLOAD_KEY] = jsonPayload
-                }
-
-                val serviceIntent = Intent(this@WorkoutMessageReceiverService, WorkoutService::class.java).apply {
-                    action = ACTION_START_SESSION
-                    putExtra("sessionId", payload.sessionId)
-                    putExtra("payloadJson", jsonPayload)
-                    putExtra("sourceNodeId", sourceNodeId)
-                }
-                Log.i(WORKOUT_PROTOCOL_TAG, "Starting WorkoutService ACTION_START_SESSION")
-                try {
-                    ContextCompat.startForegroundService(this@WorkoutMessageReceiverService, serviceIntent)
-                } catch (e: Exception) {
-                    Log.e(WORKOUT_PROTOCOL_TAG, "Failed to start WorkoutService", e)
+                    prefs[WorkoutDataStoreProvider.PENDING_PAYLOAD_KEY] = payloadJson
                 }
             }
+
+            val serviceIntent = Intent(this@WorkoutMessageReceiverService, WorkoutService::class.java).apply {
+                action = ACTION_START_SESSION
+                putExtra("sessionId", payload.sessionId)
+                putExtra("payloadJson", payloadJson)
+                putExtra("sourceNodeId", sourceNodeId)
+            }
+            Log.i(WORKOUT_PROTOCOL_TAG, "event=starting_workout_service attemptId=$attemptId blocks=${payload.blocks.size}")
+            ContextCompat.startForegroundService(this@WorkoutMessageReceiverService, serviceIntent)
+
+            serviceScope.launch {
+                sendAckV2(sourceNodeId, sessionId, attemptId, success = true, reasonCode = null, reasonMessage = null)
+            }
         } catch (e: Exception) {
-            Log.e(WORKOUT_PROTOCOL_TAG, "Failed to handle workout start", e)
+            Log.e(WORKOUT_PROTOCOL_TAG, "event=internal_error attemptId=$attemptId", e)
+            serviceScope.launch {
+                sendAckV2(
+                    sourceNodeId,
+                    sessionId,
+                    attemptId,
+                    success = false,
+                    reasonCode = WorkoutProtocol.ReasonCode.INTERNAL_ERROR,
+                    reasonMessage = e.message
+                )
+            }
+        }
+    }
+
+    private suspend fun sendAckV2(
+        nodeId: String,
+        sessionId: String,
+        attemptId: String,
+        success: Boolean,
+        reasonCode: String?,
+        reasonMessage: String?
+    ) {
+        withContext(Dispatchers.IO) {
+            try {
+                val msg = WorkoutAckMessage(
+                    protocolVersion = WorkoutProtocol.PROTOCOL_VERSION,
+                    type = WorkoutProtocol.TYPE_WORKOUT_ACK,
+                    sessionId = sessionId,
+                    attemptId = attemptId,
+                    success = success,
+                    reasonCode = reasonCode,
+                    reasonMessage = reasonMessage,
+                    sentAt = System.currentTimeMillis()
+                )
+                val bytes = json.encodeToString(WorkoutAckMessage.serializer(), msg).toByteArray(Charsets.UTF_8)
+                Wearable.getMessageClient(applicationContext).sendMessage(nodeId, WORKOUT_ACK_PATH, bytes).await()
+                Log.i(WORKOUT_PROTOCOL_TAG, "event=ack_sent attemptId=$attemptId success=$success reasonCode=$reasonCode")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send ACK V2", e)
+            }
         }
     }
 
