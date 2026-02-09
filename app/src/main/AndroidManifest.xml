@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.BODY_SENSORS" />
     <uses-permission android:name="android.permission.BODY_SENSORS_BACKGROUND" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
@@ -22,6 +23,7 @@
 
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <application
         android:allowBackup="true"
@@ -81,6 +83,28 @@
             android:name=".workout.WorkoutNotificationActionReceiver"
             android:exported="false" />
 
+        <!-- Habit reminder message receiver -->
+        <service
+            android:name=".habit.HabitMessageReceiverService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/habit/reminder/start" />
+            </intent-filter>
+        </service>
+
+        <!-- Habit reminder foreground service -->
+        <service
+            android:name=".habit.HabitService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Habit retry alarm receiver -->
+        <receiver
+            android:name=".habit.HabitAlarmReceiver"
+            android:exported="false" />
+
         <service
             android:name=".service.SensorForegroundService"
             android:enabled="true"
@@ -105,6 +129,11 @@
 
         <activity
             android:name=".workout.ui.WorkoutTimerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.WorkoutTimer" />
+
+        <activity
+            android:name=".habit.HabitReminderActivity"
             android:exported="false"
             android:theme="@style/Theme.WorkoutTimer" />
     </application>
