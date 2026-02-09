@@ -59,35 +59,25 @@ object RoutineRepository {
         RoutineBlockPayload("seg_2", "Relaxed freestyle", sets = 1, targetWeight = 0f, targetReps = null, restSec = 0)
     )
 
-    private fun blockB(restSec: Int): List<RoutineBlockPayload> {
-        val list = mutableListOf<RoutineBlockPayload>()
-        for (round in 1..3) {
-            list.add(RoutineBlockPayload("squats", "Squats", sets = 1, targetWeight = 0f, targetReps = 15, restSec = 0))
-            list.add(RoutineBlockPayload("lunges", "Alternating lunges", sets = 1, targetWeight = 0f, targetReps = 10, restSec = 0))
-            list.add(RoutineBlockPayload("glute_bridges", "Glute bridges", sets = 1, targetWeight = 0f, targetReps = 20, restSec = 0))
-            list.add(RoutineBlockPayload("calf_raises", "Calf raises", sets = 1, targetWeight = 0f, targetReps = 20, restSec = 0))
-            list.add(RoutineBlockPayload("hollow_hold", "Hollow body hold", sets = 1, targetWeight = 0f, targetReps = null, restSec = 0))
-            list.add(RoutineBlockPayload("superman", "Superman hold", sets = 1, targetWeight = 0f, targetReps = null, restSec = 0))
-            if (round < 3) {
-                list.add(RoutineBlockPayload("rest_$round", "Round Rest", sets = 1, targetWeight = 0f, targetReps = null, restSec = restSec))
-            }
-        }
-        return list
-    }
+    /** Block B: 6 exercises, 3 sets each with rest between sets (Exercise - Rest - Next Set). */
+    private fun blockB(restSec: Int): List<RoutineBlockPayload> = listOf(
+        RoutineBlockPayload("squats", "Squats", sets = 3, targetWeight = 0f, targetReps = 15, restSec = restSec),
+        RoutineBlockPayload("lunges", "Alternating lunges", sets = 3, targetWeight = 0f, targetReps = 10, restSec = restSec),
+        RoutineBlockPayload("glute_bridges", "Glute bridges", sets = 3, targetWeight = 0f, targetReps = 20, restSec = restSec),
+        RoutineBlockPayload("calf_raises", "Calf raises", sets = 3, targetWeight = 0f, targetReps = 20, restSec = restSec),
+        RoutineBlockPayload("hollow_hold", "Hollow body hold", sets = 3, targetWeight = 0f, targetReps = null, restSec = restSec),
+        RoutineBlockPayload("superman", "Superman hold", sets = 3, targetWeight = 0f, targetReps = null, restSec = restSec)
+    )
 
-    private val blockC: List<RoutineBlockPayload> = buildList {
-        for (round in 1..3) {
-            add(RoutineBlockPayload("step_ups", "Step-ups", sets = 1, targetWeight = 0f, targetReps = 10, restSec = 0))
-            add(RoutineBlockPayload("pistol_squats", "Assisted pistol squats", sets = 1, targetWeight = 0f, targetReps = 5, restSec = 0))
-            add(RoutineBlockPayload("wall_sit", "Wall sit", sets = 1, targetWeight = 0f, targetReps = null, restSec = 0))
-            add(RoutineBlockPayload("bicycle_crunches", "Bicycle crunches", sets = 1, targetWeight = 0f, targetReps = 20, restSec = 0))
-            add(RoutineBlockPayload("forearm_plank", "Forearm plank", sets = 1, targetWeight = 0f, targetReps = null, restSec = 0))
-            add(RoutineBlockPayload("lateral_leg_raises", "Lateral leg raises", sets = 1, targetWeight = 0f, targetReps = 15, restSec = 0))
-            if (round < 3) {
-                add(RoutineBlockPayload("rest_$round", "Round Rest", sets = 1, targetWeight = 0f, targetReps = null, restSec = 30))
-            }
-        }
-    }
+    /** Block C: 6 exercises, 3 sets each with 30s rest between sets. */
+    private val blockC: List<RoutineBlockPayload> = listOf(
+        RoutineBlockPayload("step_ups", "Step-ups", sets = 3, targetWeight = 0f, targetReps = 10, restSec = 30),
+        RoutineBlockPayload("pistol_squats", "Assisted pistol squats", sets = 3, targetWeight = 0f, targetReps = 5, restSec = 30),
+        RoutineBlockPayload("wall_sit", "Wall sit", sets = 3, targetWeight = 0f, targetReps = null, restSec = 30),
+        RoutineBlockPayload("bicycle_crunches", "Bicycle crunches", sets = 3, targetWeight = 0f, targetReps = 20, restSec = 30),
+        RoutineBlockPayload("forearm_plank", "Forearm plank", sets = 3, targetWeight = 0f, targetReps = null, restSec = 30),
+        RoutineBlockPayload("lateral_leg_raises", "Lateral leg raises", sets = 3, targetWeight = 0f, targetReps = 15, restSec = 30)
+    )
 
     private val blockD: List<RoutineBlockPayload> = buildList {
         add(RoutineBlockPayload("hip_mobility", "Hip mobility drills", sets = 1, targetWeight = 0f, targetReps = null, restSec = 0))

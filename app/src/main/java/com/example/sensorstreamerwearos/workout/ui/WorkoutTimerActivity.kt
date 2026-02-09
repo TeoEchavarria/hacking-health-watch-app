@@ -124,6 +124,7 @@ class WorkoutTimerActivity : AppCompatActivity() {
         val service = workoutService ?: return
         val state = service.uiState.value
         when (state.mode) {
+            WorkoutService.Mode.PREPARE -> { }
             WorkoutService.Mode.WORK -> sendAction(WorkoutService.ACTION_DONE_SET)
             WorkoutService.Mode.REST -> sendAction(WorkoutService.ACTION_SKIP_REST)
             WorkoutService.Mode.IDLE -> { }
@@ -134,6 +135,7 @@ class WorkoutTimerActivity : AppCompatActivity() {
         val service = workoutService ?: return
         val state = service.uiState.value
         when (state.mode) {
+            WorkoutService.Mode.PREPARE -> { }
             WorkoutService.Mode.WORK -> sendAction(WorkoutService.ACTION_PAUSE)
             WorkoutService.Mode.REST -> sendAction(WorkoutService.ACTION_EXTEND_REST)
             WorkoutService.Mode.IDLE -> { }
@@ -169,12 +171,15 @@ class WorkoutTimerActivity : AppCompatActivity() {
                 binding.progressRing.setProgress(state.progress)
 
                 val ringColor = when (state.mode) {
+                    WorkoutService.Mode.PREPARE -> Color.parseColor("#00E5FF") // Cyan
                     WorkoutService.Mode.REST -> Color.parseColor("#FF9100") // Orange
-                    else -> Color.parseColor("#00E5FF") // Cyan
+                    WorkoutService.Mode.WORK -> Color.parseColor("#00E5FF") // Cyan
+                    WorkoutService.Mode.IDLE -> Color.parseColor("#00E5FF") // Cyan
                 }
                 binding.progressRing.setForegroundColor(ringColor)
 
                 binding.doneButton.text = when (state.mode) {
+                    WorkoutService.Mode.PREPARE -> "—"
                     WorkoutService.Mode.WORK -> "DONE"
                     WorkoutService.Mode.REST -> "SKIP"
                     WorkoutService.Mode.IDLE -> "DONE"

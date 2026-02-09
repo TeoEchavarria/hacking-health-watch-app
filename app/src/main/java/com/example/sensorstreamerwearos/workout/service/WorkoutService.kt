@@ -2,6 +2,7 @@ package com.example.sensorstreamerwearos.workout.service
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.Service
 import android.app.PendingIntent
 import android.app.TaskStackBuilder
 import android.content.Context
@@ -60,6 +61,7 @@ class WorkoutService : LifecycleService() {
         private const val WORKOUT_STATE_PATH = "/workout/state"
         private const val WORKOUT_SYNC_TAG = "WorkoutSync"
         private const val TICK_INTERVAL_MS = 1000L
+        private const val PREPARE_COUNTDOWN_SEC = 10
 
         const val ACTION_START_SESSION = "com.example.sensorstreamerwearos.workout.ACTION_START_SESSION"
         const val ACTION_STATE_REQUEST = "com.example.sensorstreamerwearos.workout.ACTION_STATE_REQUEST"
@@ -92,7 +94,7 @@ class WorkoutService : LifecycleService() {
     private var sourceNodeId: String? = null
     private var sessionId: String? = null
 
-    enum class Mode { IDLE, WORK, REST }
+    enum class Mode { IDLE, PREPARE, WORK, REST }
     private var mode = Mode.IDLE
     private var blockIndex = 0
     private var setIndex = 0
@@ -194,23 +196,22 @@ class WorkoutService : LifecycleService() {
         sessionId = sid
         blockIndex = 0
         setIndex = 0
-        mode = Mode.WORK
+        mode = Mode.PREPARE
         workElapsedSec = 0
-        restRemainingSec = 0
+        restRemainingSec = PREPARE_COUNTDOWN_SEC
         isPaused = false
 
         serviceScope.launch { WorkoutDataStoreProvider.setActiveSessionId(applicationContext, sid!!) }
 
         if (_uiState.value.mode == Mode.IDLE) {
-            startForeground(NOTIFICATION_ID, createNotificationBuilder("Starting...").build())
+            startForeground(NOTIFICATION_ID, createNotificationBuilder("Get ready...").build())
         }
 
         updateUiFromState()
         startTickJob()
         updateNotification()
-        vibrateStart()
 
-        Log.i(WORKOUT_UI_TAG, "WorkoutService started")
+        Log.i(WORKOUT_UI_TAG, "WorkoutService started (prepare countdown ${PREPARE_COUNTDOWN_SEC}s)")
         Log.i(WORKOUT_PROTOCOL_TAG, "WorkoutService STARTED sessionId=${finalPayload.sessionId} blocks=${finalPayload.blocks.size}")
 
         sourceNodeId?.let { nid ->
@@ -438,7 +439,12 @@ class WorkoutService : LifecycleService() {
         mode = Mode.IDLE
         _uiState.value = _uiState.value.copy(isFinished = true, mode = Mode.IDLE)
         updateNotification()
-        stopForeground(true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(Service.STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         stopSelf()
     }
 
@@ -451,6 +457,9 @@ class WorkoutService : LifecycleService() {
     private fun updateUiFromState() {
         val blk = currentBlock()
         val progress = when (mode) {
+            Mode.PREPARE -> {
+                1f - (restRemainingSec.toFloat() / PREPARE_COUNTDOWN_SEC)
+            }
             Mode.REST -> {
                 if (blk != null && blk.restSec > 0) {
                     restRemainingSec.toFloat() / blk.restSec.toFloat()
@@ -463,11 +472,16 @@ class WorkoutService : LifecycleService() {
             else -> 0f
         }
 
+        val (exerciseName, setIndexDisplay, totalSetsDisplay) = when (mode) {
+            Mode.PREPARE -> Triple("Get ready", 0, PREPARE_COUNTDOWN_SEC)
+            else -> Triple(blk?.exerciseName ?: "", setIndex + 1, blk?.sets ?: 0)
+        }
+
         _uiState.value = WorkoutUiState(
             routineName = payload?.routineName ?: "",
-            exerciseName = blk?.exerciseName ?: "",
-            setIndex = setIndex + 1,
-            totalSets = blk?.sets ?: 0,
+            exerciseName = exerciseName,
+            setIndex = setIndexDisplay,
+            totalSets = totalSetsDisplay,
             targetWeight = blk?.targetWeight ?: 0f,
             targetReps = blk?.targetReps,
             mode = mode,
@@ -484,21 +498,40 @@ class WorkoutService : LifecycleService() {
         timerJob = serviceScope.launch {
             while (!isPaused) {
                 delay(TICK_INTERVAL_MS)
-                if (mode == Mode.WORK) {
-                    workElapsedSec++
-                    updateUiFromState()
-                } else if (mode == Mode.REST) {
-                    restRemainingSec--
-                    if (restRemainingSec <= 0) {
-                        restRemainingSec = 0
-                        vibrateRestFinished()
-                        handleSkipRest()
-                        continue
+                when (mode) {
+                    Mode.PREPARE -> {
+                        restRemainingSec--
+                        if (restRemainingSec <= 0) {
+                            restRemainingSec = 0
+                            mode = Mode.WORK
+                            workElapsedSec = 0
+                            vibrateStart()
+                            Log.i(WORKOUT_UI_TAG, "Prepare done, starting workout")
+                        }
+                        updateUiFromState()
                     }
-                    updateUiFromState()
-                } else break
+                    Mode.WORK -> {
+                        workElapsedSec++
+                        updateUiFromState()
+                    }
+                    Mode.REST -> {
+                        restRemainingSec--
+                        if (restRemainingSec <= 0) {
+                            restRemainingSec = 0
+                            vibrateRestFinished()
+                            handleSkipRest()
+                            continue
+                        }
+                        updateUiFromState()
+                    }
+                    else -> break
+                }
                 updateNotification()
-                val sec = if (mode == Mode.WORK) workElapsedSec else restRemainingSec
+                val sec = when (mode) {
+                    Mode.PREPARE -> restRemainingSec
+                    Mode.WORK -> workElapsedSec
+                    else -> restRemainingSec
+                }
                 Log.d(TAG, "timer tick mode=$mode work=$workElapsedSec rest=$restRemainingSec")
                 Log.i(WORKOUT_UI_TAG, "Timer tick sec=$sec")
             }
@@ -509,6 +542,7 @@ class WorkoutService : LifecycleService() {
         val s = _uiState.value
         val text = when {
             s.isFinished -> "FINISHED"
+            s.mode == Mode.PREPARE -> "Get ready · ${formatTime(s.restRemainingSec)}"
             s.mode == Mode.WORK -> "${s.exerciseName} · Set ${s.setIndex}/${s.totalSets} · ${formatTime(s.workElapsedSec)}"
             s.mode == Mode.REST -> "Rest · ${formatTime(s.restRemainingSec)}"
             else -> "Workout"
@@ -648,6 +682,7 @@ class WorkoutService : LifecycleService() {
     private suspend fun sendState(nodeId: String) {
         val blk = currentBlock()
         val modeStr = when (mode) {
+            Mode.PREPARE -> "PREPARE"
             Mode.WORK -> "WORK"
             Mode.REST -> "REST"
             Mode.IDLE -> if (_uiState.value.isFinished) "FINISHED" else "IDLE"
