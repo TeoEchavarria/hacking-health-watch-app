@@ -167,6 +167,19 @@ class WorkoutTimerActivity : AppCompatActivity() {
                 } else {
                     binding.setCounter.visibility = View.GONE
                 }
+                
+                // Rep counter display (only in WORK mode)
+                if (state.mode == WorkoutService.Mode.WORK) {
+                    val repText = if (state.targetReps != null && state.targetReps > 0) {
+                        "${state.currentReps} / ${state.targetReps} reps"
+                    } else {
+                        "${state.currentReps} reps"
+                    }
+                    binding.repCounter.text = repText
+                    binding.repCounter.visibility = View.VISIBLE
+                } else {
+                    binding.repCounter.visibility = View.GONE
+                }
 
                 binding.progressRing.setProgress(state.progress)
 

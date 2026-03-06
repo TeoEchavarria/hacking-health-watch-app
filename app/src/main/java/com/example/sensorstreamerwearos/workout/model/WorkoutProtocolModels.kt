@@ -91,9 +91,10 @@ data class WorkoutAckPayload(
 @Serializable
 data class WorkoutEventPayload(
     @SerialName("sessionId") val sessionId: String,
-    @SerialName("type") val type: String, // "DONE_SET" | "UNDO_SET" | "FINISH_WORKOUT"
+    @SerialName("type") val type: String, // "DONE_SET" | "UNDO_SET" | "FINISH_WORKOUT" | "REP_UPDATE"
     @SerialName("blockId") val blockId: String?,
     @SerialName("setIndex") val setIndex: Int?,
+    @SerialName("repCount") val repCount: Int? = null,
     @SerialName("source") val source: String, // "PHONE" | "WATCH"
     @SerialName("at") val at: String
 )

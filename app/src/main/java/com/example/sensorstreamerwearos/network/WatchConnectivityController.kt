@@ -9,6 +9,27 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.tasks.await
 import java.util.concurrent.atomic.AtomicBoolean
 
+/**
+ * High-throughput sensor data streaming via Channel API.
+ * 
+ * This is the PREFERRED method for continuous sensor streaming because:
+ * 1. Lower latency than DataItem API
+ * 2. Guaranteed ordering
+ * 3. Backpressure handling via store-and-forward
+ * 
+ * Communication Flow:
+ * 1. Watch opens Channel to phone on PATH_SENSOR_STREAM (/stream/sensors/v1)
+ * 2. Watch sends framed data: [version][seq][timestamp][type][payload_size][payload]
+ * 3. Phone receives via PhoneChannelReceiverService
+ * 4. Phone publishes ACK to PATH_PHONE_STATE (/state/phone) with lastReceivedSeq
+ * 5. Watch receives ACK, deletes acknowledged data from local DB
+ * 
+ * Fallback:
+ * - If Channel fails, data remains in local DB (sensor_buffer)
+ * - WatchDataSender (DataItem API) can be used as fallback for batched uploads
+ * 
+ * Note: This controller also updates ConnectionManager state when ACKs are received.
+ */
 class WatchConnectivityController(
     private val context: Context,
     private val sensorDao: SensorDao
@@ -152,8 +173,14 @@ class WatchConnectivityController(
                     event.dataItem.uri.path == Protocol.PATH_PHONE_STATE) {
                     val item = DataMapItem.fromDataItem(event.dataItem)
                     val ack = item.dataMap.getLong(Protocol.KEY_LAST_RECEIVED_SEQ)
-                    Log.d(TAG, "Received ACK from phone: $ack")
+                    val state = item.dataMap.getString(Protocol.KEY_STATE)
+                    Log.d(TAG, "Received ACK from phone: seq=$ack, state=$state")
                     _lastAckSeq.value = ack
+                    
+                    // Update connection manager - phone is alive and responding
+                    if (ack > 0 || state == "READY") {
+                        ConnectionManager.setVerified()
+                    }
                     
                     // Cleanup local DB
                     scope.launch {

@@ -180,6 +180,7 @@ class HabitService : LifecycleService() {
     private fun handleTimerFinished() {
         timerJob?.cancel()
         stopAlarmSound()
+        stopVibration()
         updateLogAndSyncToPhone(HabitReminderLog.Status.POSTPONED)
         _uiState.value = _uiState.value.copy(isActive = false)
         if (retryCount >= MAX_RETRIES) {
@@ -222,6 +223,7 @@ class HabitService : LifecycleService() {
         sourceNodeId = intent.getStringExtra(EXTRA_SOURCE_NODE_ID) ?: sourceNodeId
         timerJob?.cancel()
         stopAlarmSound()
+        stopVibration()
         updateLogAndSyncToPhone(HabitReminderLog.Status.DONE)
         _uiState.value = _uiState.value.copy(isActive = false)
         vibrateDone()
@@ -235,6 +237,7 @@ class HabitService : LifecycleService() {
         sourceNodeId = intent.getStringExtra(EXTRA_SOURCE_NODE_ID) ?: sourceNodeId
         timerJob?.cancel()
         stopAlarmSound()
+        stopVibration()
         updateLogAndSyncToPhone(HabitReminderLog.Status.POSTPONED)
         _uiState.value = _uiState.value.copy(isActive = false)
         vibratePostpone()
@@ -281,8 +284,9 @@ class HabitService : LifecycleService() {
                         .build()
                 )
                 setDataSource(applicationContext, uri)
-                isLooping = false
+                isLooping = true // Loop alarm sound
                 setOnCompletionListener {
+                    // Won't be called if looping, but good practice
                     stopAlarmSound()
                 }
                 setOnErrorListener { _, what, extra ->
@@ -425,10 +429,16 @@ class HabitService : LifecycleService() {
     private fun vibrateReminderAppear() {
         getVibrator()?.let { v ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && v.hasVibrator()) {
-                v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 150, 100, 150), -1))
-                Log.i(TAG, "Vibrate triggered for habitId=$habitId")
+                // Stronger vibration pattern: 0ms delay, 500ms on, 200ms off, 500ms on
+                // Repeat index 0 (loop from beginning)
+                v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 500, 200, 500), 0))
+                Log.i(TAG, "Vibrate triggered (looping) for habitId=$habitId")
             }
         }
+    }
+
+    private fun stopVibration() {
+        getVibrator()?.cancel()
     }
 
     private fun vibrateDone() {
@@ -450,6 +460,7 @@ class HabitService : LifecycleService() {
     override fun onDestroy() {
         timerJob?.cancel()
         stopAlarmSound()
+        stopVibration()
         serviceScope.cancel()
         super.onDestroy()
     }

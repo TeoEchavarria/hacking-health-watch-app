@@ -88,16 +88,35 @@ class WorkoutMessageReceiverService : WearableListenerService() {
 
     private fun handleWorkoutEvent(messageEvent: MessageEvent) {
         val activeSessionId = runBlocking { WorkoutDataStoreProvider.getActiveSessionId(applicationContext) }
-        if (activeSessionId == null) return
-
+        
         try {
             val jsonPayload = String(messageEvent.data, Charsets.UTF_8)
+            Log.i(TAG, "handleWorkoutEvent: activeSessionId=$activeSessionId payload=$jsonPayload")
+            
+            // Parse payload to check event type
+            val eventPayload = try {
+                json.decodeFromString<WorkoutEventPayload>(jsonPayload)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to parse workout event", e)
+                return
+            }
+            
+            // Always process FINISH_WORKOUT to ensure watch closes even if session state is stale
+            if (activeSessionId == null && eventPayload.type != "FINISH_WORKOUT") {
+                Log.w(TAG, "No active session, ignoring ${eventPayload.type}")
+                return
+            }
+            
             val serviceIntent = Intent(this, WorkoutService::class.java).apply {
                 action = WorkoutService.ACTION_REMOTE_EVENT
                 putExtra("payloadJson", jsonPayload)
                 putExtra("sourceNodeId", messageEvent.sourceNodeId)
             }
-            startService(serviceIntent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to handle workout event", e)
         }
@@ -240,6 +259,16 @@ class WorkoutMessageReceiverService : WearableListenerService() {
             }
             Log.i(WORKOUT_PROTOCOL_TAG, "event=starting_workout_service attemptId=$attemptId blocks=${payload.blocks.size}")
             ContextCompat.startForegroundService(this@WorkoutMessageReceiverService, serviceIntent)
+
+            // Attempt to bring UI to foreground
+            val activityIntent = Intent(this@WorkoutMessageReceiverService, WorkoutTimerActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            try {
+                startActivity(activityIntent)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not start activity from background", e)
+            }
 
             serviceScope.launch {
                 sendAckV2(sourceNodeId, sessionId, attemptId, success = true, reasonCode = null, reasonMessage = null)

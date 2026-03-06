@@ -19,6 +19,8 @@ import androidx.lifecycle.LifecycleService
 import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
 import com.example.sensorstreamerwearos.R
+import com.example.sensorstreamerwearos.ml.RepDetector
+import com.example.sensorstreamerwearos.sensor.HealthServicesManager
 import com.example.sensorstreamerwearos.workout.WorkoutMessageReceiverService
 import com.example.sensorstreamerwearos.workout.model.RoutineBlockPayload
 import com.example.sensorstreamerwearos.workout.model.RoutinePayload
@@ -59,6 +61,7 @@ class WorkoutService : LifecycleService() {
         private const val WORKOUT_ACK_PATH = "/workout/ack"
         private const val WORKOUT_EVENT_PATH = "/workout/event"
         private const val WORKOUT_STATE_PATH = "/workout/state"
+        private const val WORKOUT_REP_PATH = "/workout/rep"
         private const val WORKOUT_SYNC_TAG = "WorkoutSync"
         private const val TICK_INTERVAL_MS = 1000L
         private const val PREPARE_COUNTDOWN_SEC = 10
@@ -101,6 +104,11 @@ class WorkoutService : LifecycleService() {
     private var workElapsedSec = 0
     private var restRemainingSec = 0
     private var isPaused = false
+    private var currentReps = 0
+    
+    // Rep detection
+    private var repDetector: RepDetector? = null
+    private var sensorManager: HealthServicesManager? = null
 
     private val _uiState = MutableStateFlow(WorkoutUiState())
     val uiState: StateFlow<WorkoutUiState> = _uiState.asStateFlow()
@@ -112,6 +120,7 @@ class WorkoutService : LifecycleService() {
         val totalSets: Int = 0,
         val targetWeight: Float = 0f,
         val targetReps: Int? = null,
+        val currentReps: Int = 0,
         val mode: Mode = Mode.IDLE,
         val workElapsedSec: Int = 0,
         val restRemainingSec: Int = 0,
@@ -126,8 +135,64 @@ class WorkoutService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        initRepDetection()
         Log.i(TAG, "WorkoutService created")
         Log.i(WORKOUT_UI_TAG, "WorkoutService created")
+    }
+    
+    private fun initRepDetection() {
+        sensorManager = HealthServicesManager(applicationContext)
+        repDetector = RepDetector(applicationContext)
+        
+        // Connect sensor data to rep detector
+        sensorManager?.setWorkoutListener { timestamp, accel, gyro ->
+            repDetector?.onSensorData(timestamp, accel, gyro)
+        }
+        
+        // Handle detected reps
+        repDetector?.onRepDetected = {
+            onRepDetected()
+        }
+        
+        Log.i(TAG, "Rep detection initialized")
+    }
+    
+    private fun onRepDetected() {
+        if (mode != Mode.WORK || isPaused) return
+        
+        currentReps++
+        Log.i(WORKOUT_SYNC_TAG, "Rep detected: currentReps=$currentReps")
+        
+        // Vibrate briefly for feedback
+        vibrateRepDetected()
+        
+        // Update UI immediately
+        updateUiFromState()
+        
+        // Send to phone
+        val blk = currentBlock()
+        sourceNodeId?.let { nid ->
+            serviceScope.launch { sendRepUpdate(nid, blk?.blockId ?: "", setIndex, currentReps) }
+        }
+    }
+    
+    private fun vibrateRepDetected() {
+        val vibrator = getVibrator() ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && vibrator.hasVibrator()) {
+            vibrator.vibrate(VibrationEffect.createOneShot(30, VibrationEffect.DEFAULT_AMPLITUDE))
+        }
+    }
+    
+    private fun setWorkoutModeEnabled(enabled: Boolean) {
+        if (enabled) {
+            sensorManager?.setWorkoutMode(true)
+            sensorManager?.startAccelerometerMonitoring()
+            repDetector?.reset()
+            currentReps = 0
+        } else {
+            sensorManager?.setWorkoutMode(false)
+            sensorManager?.stopAccelerometerMonitoring()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -216,7 +281,7 @@ class WorkoutService : LifecycleService() {
 
         sourceNodeId?.let { nid ->
             serviceScope.launch {
-                sendAck(nid, finalPayload.sessionId, finalPayload.routineId, "STARTED", null)
+                // sendAck(nid, finalPayload.sessionId, finalPayload.routineId, "STARTED", null) // Removed to avoid V1/V2 protocol conflict
                 sendState(nid)
                 launchWorkoutTimerActivity()
             }
@@ -259,6 +324,7 @@ class WorkoutService : LifecycleService() {
         if (restSec <= 0) {
             advanceSetOrBlock()
         } else {
+            setWorkoutModeEnabled(false)
             mode = Mode.REST
             restRemainingSec = restSec
             updateUiFromState()
@@ -297,8 +363,12 @@ class WorkoutService : LifecycleService() {
 
         when (payload.type) {
             "DONE_SET" -> {
-                Log.i(WORKOUT_SYNC_TAG, "RX DONE_SET from PHONE set=${payload.setIndex}")
-                if (mode == Mode.IDLE) return
+                Log.i(WORKOUT_SYNC_TAG, "RX DONE_SET from PHONE set=${payload.setIndex} mode=$mode")
+                // Only process during WORK or REST mode (not IDLE or PREPARE)
+                if (mode == Mode.IDLE || mode == Mode.PREPARE) {
+                    Log.d(WORKOUT_SYNC_TAG, "Ignoring DONE_SET in $mode mode")
+                    return
+                }
                 
                 val pBlockId = payload.blockId
                 val pSetIndex = payload.setIndex
@@ -410,6 +480,7 @@ class WorkoutService : LifecycleService() {
         mode = Mode.WORK
         workElapsedSec = 0
         restRemainingSec = 0
+        setWorkoutModeEnabled(true)
         updateUiFromState()
         updateNotification()
         sourceNodeId?.let { nid -> serviceScope.launch { sendState(nid) } }
@@ -417,6 +488,7 @@ class WorkoutService : LifecycleService() {
 
     private fun finishWorkout() {
         timerJob?.cancel()
+        setWorkoutModeEnabled(false)
         runBlocking { WorkoutDataStoreProvider.clearActiveSessionId(applicationContext) }
         val blocks = payload?.blocks ?: emptyList()
         val lastBlk = if (blockIndex > 0) blocks.getOrNull(blockIndex - 1) else blocks.firstOrNull()
@@ -484,6 +556,7 @@ class WorkoutService : LifecycleService() {
             totalSets = totalSetsDisplay,
             targetWeight = blk?.targetWeight ?: 0f,
             targetReps = blk?.targetReps,
+            currentReps = currentReps,
             mode = mode,
             workElapsedSec = workElapsedSec,
             restRemainingSec = restRemainingSec,
@@ -505,6 +578,7 @@ class WorkoutService : LifecycleService() {
                             restRemainingSec = 0
                             mode = Mode.WORK
                             workElapsedSec = 0
+                            setWorkoutModeEnabled(true)
                             vibrateStart()
                             Log.i(WORKOUT_UI_TAG, "Prepare done, starting workout")
                         }
@@ -678,6 +752,27 @@ class WorkoutService : LifecycleService() {
             }
         }
     }
+    
+    private suspend fun sendRepUpdate(nodeId: String, blockId: String, setIdx: Int, repCount: Int) {
+        withContext(Dispatchers.IO) {
+            try {
+                val payload = WorkoutEventPayload(
+                    sessionId = sessionId ?: "",
+                    type = "REP_UPDATE",
+                    blockId = blockId,
+                    setIndex = setIdx,
+                    repCount = repCount,
+                    source = "WATCH",
+                    at = java.time.Instant.now().toString()
+                )
+                val bytes = json.encodeToString(WorkoutEventPayload.serializer(), payload).toByteArray(Charsets.UTF_8)
+                Wearable.getMessageClient(applicationContext).sendMessage(nodeId, WORKOUT_REP_PATH, bytes).await()
+                Log.i(WORKOUT_SYNC_TAG, "TX REP_UPDATE sessionId=${sessionId} blockId=$blockId set=$setIdx reps=$repCount")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send rep update", e)
+            }
+        }
+    }
 
     private suspend fun sendState(nodeId: String) {
         val blk = currentBlock()
@@ -734,6 +829,10 @@ class WorkoutService : LifecycleService() {
 
     override fun onDestroy() {
         timerJob?.cancel()
+        setWorkoutModeEnabled(false)
+        repDetector?.close()
+        repDetector = null
+        sensorManager = null
         serviceScope.cancel()
         Log.d(TAG, "WorkoutService destroyed")
         super.onDestroy()
