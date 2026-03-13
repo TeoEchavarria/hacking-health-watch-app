@@ -1,17 +1,23 @@
-# Sensor Streamer WearOS
-A minimal, hackable sensor streamer for Android WearOS. Originally created for [_SAMoSA_ (IMWUT/Ubicomp 2022)](https://vimalmollyn.com/research/samosa/).
+# ⌚ Hacking Health Watch App
 
-<p align="center">
-  <img src="media/icon.png" width="30%"/>
-</p>
+Tu monitor de salud en la muñeca. Captura datos de bienestar en tiempo real desde tu smartwatch.
 
-## What's it good for?
-Sensor Streamer streams IMU (accelerometer, gyroscope, magnetometer, rotation vector, etc) and Audio data from an Android smartwatch to a local UDP server. Tested with WearOS v2.23 and Android Studio Arctic Fox | 2020.3.1 Beta 3, on a Fossil Gen 5 smartwatch and an M1 Macbook Air running MacOS 11.2.
+## 🎯 Visión
 
-## How to use?
-Compile and install the app on your android watch. Enter your UDP server's IP Address. Data is streamed on `port 5005`. 
+Hacking Health en tu muñeca. Esta aplicación WearOS recopila datos de salud continuamente y los sincroniza con el ecosistema central, permitiendo:
 
-<p float="left" align="center">
-  <img title="background img credit: verge.com" src="./media/app_drawer.png" width="30%"/>
-  <img title="background img credit: popsci.com" src="./media/app_preview.png" width="30%"/>
-</p>
+- **Monitoreo 24/7** - Captura datos de actividad, ritmo cardíaco y métricas de salud
+- **Sincronización automática** - Los datos se envían inmediatamente al backend
+- **Reflexión en tiempo real** - Recibe notificaciones y alertas basadas en tus métricas
+- **Experiencia integrada** - Completa el cuadro de datos que captura tu app móvil
+
+## 🔗 Conectado con
+
+- **[hacking-health-app](../hacking-health-app/)** - La app móvil donde visualizas análisis detallados
+- **[hacking-health-api](../hacking-health-api/)** - El backend que procesa y almacena tus datos
+
+El smartwatch es el sensor continuo del ecosistema. Mientras tu teléfono captura datos detallados, tu reloj captura el contexto de actividad, proporcionando una visión 360° de tu salud.
+
+## 📡 Qué Hace
+
+Una aplicación Android WearOS que recopila sensores de salud del smartwatch (actividad, pulso, movimiento) y los sincroniza en tiempo real con la plataforma Hacking Health para un monitoreo completo e integrado.
