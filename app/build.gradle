@@ -5,9 +5,13 @@ plugins {
     id 'org.jetbrains.kotlin.kapt' version '1.9.22'
 }
 
-
-
-
+// Extract version from VERSION_TAG env var (e.g., "1.2.7") or use defaults
+def versionTag = System.getenv("VERSION_TAG") ?: "1.0.0"
+def versionParts = versionTag.tokenize('.')
+def major = versionParts.size() > 0 ? versionParts[0].toInteger() : 1
+def minor = versionParts.size() > 1 ? versionParts[1].toInteger() : 0
+def patch = versionParts.size() > 2 ? versionParts[2].toInteger() : 0
+def computedVersionCode = major * 10000 + minor * 100 + patch
 
 android {
     namespace 'com.example.sensorstreamerwearos'
@@ -18,8 +22,8 @@ android {
         applicationId "com.samsung.android.health.sdk.sample.healthdiary"
         minSdk 30
         targetSdk 34
-        versionCode 1001
-        versionName "1.0.1"
+        versionCode computedVersionCode
+        versionName versionTag
 
     }
 
@@ -30,11 +34,19 @@ android {
             keyAlias "androiddebugkey"
             keyPassword "android"
         }
+        release {
+            def keystorePath = System.getenv("KEYSTORE_PATH")
+            storeFile keystorePath ? file(keystorePath) : null
+            storePassword System.getenv("KEYSTORE_PASSWORD") ?: ""
+            keyAlias System.getenv("KEY_ALIAS") ?: ""
+            keyPassword System.getenv("KEY_PASSWORD") ?: ""
+        }
     }
 
     buildTypes {
         release {
-            signingConfig signingConfigs.debug  // Sign release with debug keystore for CI
+            // Use release signing if available (CI), otherwise fall back to debug
+            signingConfig System.getenv("KEYSTORE_PATH") ? signingConfigs.release : signingConfigs.debug
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
