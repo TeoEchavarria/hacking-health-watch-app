@@ -69,6 +69,12 @@
     @com.google.gson.annotations.SerializedName <fields>;
 }
 
+# Keep TypeToken anonymous classes for Gson reflection (fixes ParameterizedType errors)
+-keep class com.google.gson.reflect.TypeToken { *; }
+-keep class * extends com.google.gson.reflect.TypeToken
+-keepattributes EnclosingMethod
+-keepattributes InnerClasses
+
 # ===== Keep services =====
 -keep class com.example.sensorstreamerwearos.service.** { *; }
 -keep class com.example.sensorstreamerwearos.workout.service.** { *; }
