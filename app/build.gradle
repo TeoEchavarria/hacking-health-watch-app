@@ -34,6 +34,7 @@ android {
 
     buildTypes {
         release {
+            signingConfig signingConfigs.debug  // Sign release with debug keystore for CI
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
