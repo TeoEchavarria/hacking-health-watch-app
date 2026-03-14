@@ -19,8 +19,7 @@ import androidx.lifecycle.LifecycleService
 import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
 import com.example.sensorstreamerwearos.R
-import com.example.sensorstreamerwearos.ml.RepDetector
-import com.example.sensorstreamerwearos.sensor.HealthServicesManager
+// Rep detection removed - using manual counting or exercise service counts only
 import com.example.sensorstreamerwearos.workout.WorkoutMessageReceiverService
 import com.example.sensorstreamerwearos.workout.model.RoutineBlockPayload
 import com.example.sensorstreamerwearos.workout.model.RoutinePayload
@@ -106,9 +105,7 @@ class WorkoutService : LifecycleService() {
     private var isPaused = false
     private var currentReps = 0
     
-    // Rep detection
-    private var repDetector: RepDetector? = null
-    private var sensorManager: HealthServicesManager? = null
+    // Rep detection removed - reps now tracked via phone sync or manual input
 
     private val _uiState = MutableStateFlow(WorkoutUiState())
     val uiState: StateFlow<WorkoutUiState> = _uiState.asStateFlow()
@@ -135,36 +132,22 @@ class WorkoutService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        initRepDetection()
         Log.i(TAG, "WorkoutService created")
         Log.i(WORKOUT_UI_TAG, "WorkoutService created")
     }
     
-    private fun initRepDetection() {
-        sensorManager = HealthServicesManager(applicationContext)
-        repDetector = RepDetector(applicationContext)
-        
-        // Connect sensor data to rep detector
-        sensorManager?.setWorkoutListener { timestamp, accel, gyro ->
-            repDetector?.onSensorData(timestamp, accel, gyro)
-        }
-        
-        // Handle detected reps
-        repDetector?.onRepDetected = {
-            onRepDetected()
-        }
-        
-        Log.i(TAG, "Rep detection initialized")
-    }
-    
-    private fun onRepDetected() {
+    /**
+     * Manual rep increment - called when user taps to add a rep.
+     * Rep auto-detection has been removed.
+     */
+    fun incrementRep() {
         if (mode != Mode.WORK || isPaused) return
         
         currentReps++
-        Log.i(WORKOUT_SYNC_TAG, "Rep detected: currentReps=$currentReps")
+        Log.i(WORKOUT_SYNC_TAG, "Manual rep added: currentReps=$currentReps")
         
         // Vibrate briefly for feedback
-        vibrateRepDetected()
+        vibrateRepAdded()
         
         // Update UI immediately
         updateUiFromState()
@@ -176,7 +159,7 @@ class WorkoutService : LifecycleService() {
         }
     }
     
-    private fun vibrateRepDetected() {
+    private fun vibrateRepAdded() {
         val vibrator = getVibrator() ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && vibrator.hasVibrator()) {
             vibrator.vibrate(VibrationEffect.createOneShot(30, VibrationEffect.DEFAULT_AMPLITUDE))
@@ -184,15 +167,7 @@ class WorkoutService : LifecycleService() {
     }
     
     private fun setWorkoutModeEnabled(enabled: Boolean) {
-        if (enabled) {
-            sensorManager?.setWorkoutMode(true)
-            sensorManager?.startAccelerometerMonitoring()
-            repDetector?.reset()
-            currentReps = 0
-        } else {
-            sensorManager?.setWorkoutMode(false)
-            sensorManager?.stopAccelerometerMonitoring()
-        }
+        currentReps = if (enabled) 0 else currentReps
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -830,9 +805,6 @@ class WorkoutService : LifecycleService() {
     override fun onDestroy() {
         timerJob?.cancel()
         setWorkoutModeEnabled(false)
-        repDetector?.close()
-        repDetector = null
-        sensorManager = null
         serviceScope.cancel()
         Log.d(TAG, "WorkoutService destroyed")
         super.onDestroy()

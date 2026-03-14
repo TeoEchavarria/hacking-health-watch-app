@@ -3,5 +3,6 @@
     <!-- Declare capabilities for this watch app -->
     <string-array name="android_wear_capabilities">
         <item>sensor_data_sender</item>
+        <item>wear_health_sync</item>
     </string-array>
 </resources>

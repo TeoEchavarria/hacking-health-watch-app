@@ -1,10 +1,16 @@
 package com.example.sensorstreamerwearos.network
 
 object Protocol {
-    const val VERSION = 1
+    const val VERSION = 2
 
-    // Channel Paths
+    // Channel Paths (Legacy - kept for compatibility)
     const val PATH_SENSOR_STREAM = "/stream/sensors/v1"
+
+    // Health Data Paths (New primary paths)
+    const val PATH_HEALTH_DAILY = "/health/daily"
+    const val PATH_HEALTH_HR = "/health/hr"
+    const val PATH_HEALTH_SLEEP = "/health/sleep"
+    const val PATH_HEALTH_STEPS = "/health/steps"
 
     // Data API Paths (State Sync)
     const val PATH_WATCH_STATE = "/state/watch"
@@ -21,4 +27,5 @@ object Protocol {
 
     // Capabilities
     const val CAPABILITY_PHONE_APP = "sensor_data_receiver"
+    const val CAPABILITY_HEALTH_RECEIVER = "health_data_receiver"
 }

@@ -16,6 +16,7 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -115,11 +116,23 @@
             android:name=".habit.HabitAlarmReceiver"
             android:exported="false" />
 
+        <!-- Health data sync service using Wear OS Health Services API -->
         <service
-            android:name=".service.SensorForegroundService"
+            android:name=".service.HealthSyncService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="health" />
+
+        <!-- Boot receiver to start health sync on device boot -->
+        <receiver
+            android:name=".receiver.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".service.HeartRateForegroundService"
