@@ -1,6 +1,14 @@
 package com.example.sensorstreamerwearos.service
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.content.Intent
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import com.example.sensorstreamerwearos.R
 import com.example.sensorstreamerwearos.network.ConnectionManager
 import com.example.sensorstreamerwearos.network.Protocol
 import com.google.android.gms.wearable.DataEvent
@@ -21,7 +29,7 @@ import org.json.JSONObject
  * Service that listens for Data Layer events from the phone app.
  * Handles:
  * - DATA_CHANGED: /handshake_ack, /state/phone, /handshake_request (legacy)
- * - MESSAGE_RECEIVED: /pong
+ * - MESSAGE_RECEIVED: /pong, /notification/test
  */
 class WatchReceiverService : WearableListenerService() {
 
@@ -30,6 +38,7 @@ class WatchReceiverService : WearableListenerService() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "WatchReceiverService created")
+        createNotificationChannel()
     }
 
     override fun onMessageReceived(messageEvent: MessageEvent) {
@@ -41,7 +50,31 @@ class WatchReceiverService : WearableListenerService() {
             "/pong" -> {
                 Log.d(TAG, "🏓 PONG Message received from phone! Connection Verified.")
                 ConnectionManager.setVerified()
+                ensureHealthSyncRunning()
             }
+            "/notification/test" -> {
+                val message = String(messageEvent.data)
+                Log.d(TAG, "📱 Test notification received: $message")
+                showConnectionTestNotification(message)
+                ConnectionManager.setVerified()
+                ensureHealthSyncRunning()
+            }
+        }
+    }
+    
+    /**
+     * Ensure HealthSyncService is running when connection is verified.
+     * This starts health data collection and sync to phone.
+     */
+    private fun ensureHealthSyncRunning() {
+        try {
+            Log.i(TAG, "Starting HealthSyncService from WatchReceiverService")
+            val intent = Intent(this, HealthSyncService::class.java).apply {
+                action = HealthSyncService.ACTION_START
+            }
+            androidx.core.content.ContextCompat.startForegroundService(this, intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start HealthSyncService", e)
         }
     }
 
@@ -116,5 +149,40 @@ class WatchReceiverService : WearableListenerService() {
 
     companion object {
         private const val TAG = "WatchReceiverService"
+        private const val CHANNEL_ID = "connection_test_channel"
+        private const val NOTIFICATION_ID = 9001
+    }
+    
+    private fun createNotificationChannel() {
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Connection Test",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Notifications for connection tests from phone"
+            enableVibration(true)
+        }
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.createNotificationChannel(channel)
+    }
+    
+    private fun showConnectionTestNotification(message: String) {
+        // Vibrate to get user attention
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        vibrator.vibrate(VibrationEffect.createOneShot(500, VibrationEffect.DEFAULT_AMPLITUDE))
+        
+        // Show notification
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("Phone Connected")
+            .setContentText(message)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .build()
+        
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(NOTIFICATION_ID, notification)
+        
+        Log.d(TAG, "Notification shown: $message")
     }
 }

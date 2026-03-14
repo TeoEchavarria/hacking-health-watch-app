@@ -14,6 +14,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
+import com.example.sensorstreamerwearos.service.HealthSyncService;
 import com.example.sensorstreamerwearos.workout.service.WorkoutService;
 import com.example.sensorstreamerwearos.workout.ui.WorkoutTimerActivity;
 import java.util.ArrayList;
@@ -70,6 +71,7 @@ public class MainActivity extends AppCompatActivity {
                 }
                 if (allGranted) {
                     Log.d(TAG, "Permissions granted");
+                    startHealthSyncServiceIfNeeded();
                 } else {
                     Toast.makeText(this, "Permissions required", Toast.LENGTH_SHORT).show();
                 }
@@ -98,7 +100,19 @@ public class MainActivity extends AppCompatActivity {
             Log.d(TAG, "Requesting permissions: " + permissions);
             requestPermissionLauncher.launch(permissions.toArray(new String[0]));
         } else {
+            startHealthSyncServiceIfNeeded();
             performRedirect();
+        }
+    }
+
+    private void startHealthSyncServiceIfNeeded() {
+        try {
+            Log.i(TAG, "Starting HealthSyncService from MainActivity");
+            Intent healthIntent = new Intent(this, HealthSyncService.class);
+            healthIntent.setAction(HealthSyncService.ACTION_START);
+            ContextCompat.startForegroundService(this, healthIntent);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to start HealthSyncService", e);
         }
     }
 
