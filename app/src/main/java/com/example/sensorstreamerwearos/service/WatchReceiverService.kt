@@ -69,12 +69,15 @@ class WatchReceiverService : WearableListenerService() {
     private fun ensureHealthSyncRunning() {
         try {
             Log.i(TAG, "Starting HealthSyncService from WatchReceiverService")
+            Log.i(TAG, "[DIAGNOSTIC][RECEIVER] Pong/connection verified - starting HealthSyncService")
             val intent = Intent(this, HealthSyncService::class.java).apply {
                 action = HealthSyncService.ACTION_START
             }
             androidx.core.content.ContextCompat.startForegroundService(this, intent)
+            Log.i(TAG, "[DIAGNOSTIC][RECEIVER][SUCCESS] HealthSyncService start requested")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start HealthSyncService", e)
+            Log.e(TAG, "[DIAGNOSTIC][RECEIVER][ERROR] Failed to start HealthSyncService: ${e.message}")
         }
     }
 

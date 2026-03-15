@@ -7,9 +7,13 @@ object Protocol {
     const val PATH_SENSOR_STREAM = "/stream/sensors/v1"
 
     // Health Data Paths (New primary paths)
-    const val PATH_HEALTH_DAILY = "/health/daily"
-    const val PATH_HEALTH_HR = "/health/hr"
+    const val PATH_HEALTH_DAILY = "/health/daily"     // ACTIVE: Daily summary every 15 min
+    const val PATH_HEALTH_HR = "/health/hr"           // ACTIVE: HR batches when 5+ samples
+    
+    // DEPRECATED: Unused paths - all metrics sent via PATH_HEALTH_DAILY
+    @Deprecated("Not used - sleep data included in PATH_HEALTH_DAILY", ReplaceWith("PATH_HEALTH_DAILY"))
     const val PATH_HEALTH_SLEEP = "/health/sleep"
+    @Deprecated("Not used - steps data included in PATH_HEALTH_DAILY", ReplaceWith("PATH_HEALTH_DAILY"))
     const val PATH_HEALTH_STEPS = "/health/steps"
 
     // Data API Paths (State Sync)

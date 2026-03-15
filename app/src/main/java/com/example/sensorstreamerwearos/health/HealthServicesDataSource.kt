@@ -58,6 +58,10 @@ class HealthServicesDataSource(
     @Volatile private var todaySleepMinutes: Int? = null
     @Volatile private var isMonitoringRegistered = false
     
+    // Sleep state tracking
+    @Volatile private var sleepStartTimestamp: Long? = null
+    @Volatile private var lastSleepDate: String? = null
+    
     override suspend fun isAvailable(): Boolean {
         return try {
             val capabilities = passiveMonitoringClient.getCapabilitiesAsync().await()
@@ -152,6 +156,7 @@ class HealthServicesDataSource(
         
         override fun onNewDataPointsReceived(dataPoints: DataPointContainer) {
             Log.d(TAG, "Received new data points")
+            Log.d(TAG, "[DIAGNOSTIC] DataPoints received - HR count: ${dataPoints.getData(DataType.HEART_RATE_BPM).size}, Steps count: ${dataPoints.getData(DataType.STEPS_DAILY).size}")
             
             // Process heart rate samples
             dataPoints.getData(DataType.HEART_RATE_BPM).forEach { dataPoint ->
@@ -168,41 +173,112 @@ class HealthServicesDataSource(
                 latestHeartRate = sample
                 _heartRateFlow.tryEmit(sample)
                 Log.d(TAG, "HR sample: $bpm bpm")
+                Log.i(TAG, "[HEART_RATE][WATCH][COLLECTED] bpm=$bpm, timestamp=$timestamp, accuracy=${sample.accuracy}")
             }
             
             // Process daily steps
             dataPoints.getData(DataType.STEPS_DAILY).forEach { dataPoint ->
                 val steps = dataPoint.value.toInt()
+                val currentDate = getTodayDateString()
                 todaySteps = steps
                 _stepsFlow.tryEmit(steps)
                 Log.d(TAG, "Steps update: $steps")
+                Log.i(TAG, "[STEPS][WATCH][COLLECTED] value=$steps, date=$currentDate, timestamp=${System.currentTimeMillis()}")
+                
+                if (steps == 0) {
+                    Log.w(TAG, "[STEPS][WATCH][COLLECTED] value=0 - no movement detected or Health Services not tracking")
+                }
             }
         }
         
         override fun onUserActivityInfoReceived(info: UserActivityInfo) {
             Log.d(TAG, "User activity: ${info.userActivityState}")
             
-            // Track sleep via user activity state
+            val currentTimestamp = System.currentTimeMillis()
+            val currentDate = getTodayDateString()
+            
+            // Track sleep via user activity state with duration calculation
             when (info.userActivityState) {
                 UserActivityState.USER_ACTIVITY_ASLEEP -> {
-                    // User went to sleep - track start time
-                    Log.d(TAG, "User asleep")
+                    // User just fell asleep - record start timestamp
+                    Log.i(TAG, "User fell asleep at $currentTimestamp")
+                    Log.i(TAG, "[SLEEP][WATCH][COLLECTED] state=ASLEEP_START, date=$currentDate, timestamp=$currentTimestamp")
+                    
+                    // If it's a new day, reset sleep tracking
+                    if (currentDate != lastSleepDate) {
+                        if (todaySleepMinutes != null) {
+                            Log.i(TAG, "[SLEEP][WATCH][COLLECTED] date_boundary, previous_total=${todaySleepMinutes}min")
+                        }
+                        todaySleepMinutes = null
+                        lastSleepDate = currentDate
+                    }
+                    
+                    sleepStartTimestamp = currentTimestamp
                 }
                 UserActivityState.USER_ACTIVITY_PASSIVE -> {
-                    // User woke up or is inactive
-                    Log.d(TAG, "User passive/awake")
+                    // User woke up - calculate sleep duration if we have start timestamp
+                    Log.i(TAG, "SLEEP_STATE transition: PASSIVE (awake), timestamp=$currentTimestamp")
+                    if (sleepStartTimestamp != null) {
+                        val sleepDurationMs = currentTimestamp - sleepStartTimestamp!!
+                        val sleepDurationMinutes = (sleepDurationMs / 60_000).toInt()
+                        
+                        // Only count sleep sessions longer than 10 minutes to avoid false positives
+                        if (sleepDurationMinutes >= 10) {
+                            // Add to today's total sleep (handles multiple naps/sleep sessions)
+                            val previousTotal = todaySleepMinutes ?: 0
+                            todaySleepMinutes = previousTotal + sleepDurationMinutes
+                            
+                            val hours = sleepDurationMinutes / 60.0
+                            Log.i(TAG, "User woke up. Sleep session: ${String.format("%.1f", hours)} hours ($sleepDurationMinutes min). Total today: $todaySleepMinutes min")
+                            Log.i(TAG, "[SLEEP][WATCH][COLLECTED] state=AWAKE, session_duration=${sleepDurationMinutes}min, total_today=${todaySleepMinutes}min, date=$currentDate")
+                        } else {
+                            Log.d(TAG, "Ignoring short sleep session: $sleepDurationMinutes min")
+                            Log.w(TAG, "[SLEEP][WATCH][COLLECTED] state=REJECTED, duration=${sleepDurationMinutes}min, reason=below_10min_threshold")
+                        }
+                        
+                        sleepStartTimestamp = null
+                    } else {
+                        Log.d(TAG, "User passive/awake (no sleep start timestamp)")
+                    }
                 }
                 UserActivityState.USER_ACTIVITY_EXERCISE -> {
                     Log.d(TAG, "User exercising")
+                    
+                    // If we were tracking sleep, finalize it (interrupted by exercise)
+                    if (sleepStartTimestamp != null) {
+                        val sleepDurationMs = currentTimestamp - sleepStartTimestamp!!
+                        val sleepDurationMinutes = (sleepDurationMs / 60_000).toInt()
+                        
+                        if (sleepDurationMinutes >= 10) {
+                            todaySleepMinutes = (todaySleepMinutes ?: 0) + sleepDurationMinutes
+                            Log.i(TAG, "Sleep interrupted by exercise. Session: $sleepDurationMinutes min. Total: $todaySleepMinutes min")
+                        }
+                        
+                        sleepStartTimestamp = null
+                    }
                 }
                 else -> {
                     Log.d(TAG, "Unknown activity state")
+                    
+                    // If we were tracking sleep, finalize it
+                    if (sleepStartTimestamp != null) {
+                        val sleepDurationMs = currentTimestamp - sleepStartTimestamp!!
+                        val sleepDurationMinutes = (sleepDurationMs / 60_000).toInt()
+                        
+                        if (sleepDurationMinutes >= 10) {
+                            todaySleepMinutes = (todaySleepMinutes ?: 0) + sleepDurationMinutes
+                            Log.i(TAG, "Sleep interrupted. Session: $sleepDurationMinutes min. Total: $todaySleepMinutes min")
+                        }
+                        
+                        sleepStartTimestamp = null
+                    }
                 }
             }
         }
         
         override fun onPermissionLost() {
             Log.w(TAG, "Health Services permission lost")
+            Log.e(TAG, "PERMISSION_LOST: Health Services passive monitoring permission revoked - data collection stopped")
             isMonitoringRegistered = false
         }
     }

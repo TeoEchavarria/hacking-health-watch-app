@@ -21,6 +21,7 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED -> {
                 Log.i(TAG, "Boot/Update completed - starting HealthSyncService")
+                Log.i(TAG, "[DIAGNOSTIC][BOOT] Boot/Update event received: ${intent.action}")
                 startHealthSyncService(context)
             }
         }
@@ -28,11 +29,16 @@ class BootReceiver : BroadcastReceiver() {
     
     private fun startHealthSyncService(context: Context) {
         try {
-            val serviceIntent = Intent(context, HealthSyncService::class.java)
+            Log.i(TAG, "[DIAGNOSTIC][BOOT] Attempting to start HealthSyncService")
+            val serviceIntent = Intent(context, HealthSyncService::class.java).apply {
+                action = HealthSyncService.ACTION_START
+            }
             context.startForegroundService(serviceIntent)
             Log.i(TAG, "HealthSyncService start requested")
+            Log.i(TAG, "[DIAGNOSTIC][BOOT][SUCCESS] HealthSyncService started successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start HealthSyncService", e)
+            Log.e(TAG, "[DIAGNOSTIC][BOOT][ERROR] Failed to start HealthSyncService: ${e.message}")
         }
     }
 }

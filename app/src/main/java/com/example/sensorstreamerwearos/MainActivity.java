@@ -108,11 +108,14 @@ public class MainActivity extends AppCompatActivity {
     private void startHealthSyncServiceIfNeeded() {
         try {
             Log.i(TAG, "Starting HealthSyncService from MainActivity");
+            Log.i(TAG, "[DIAGNOSTIC][MAIN] Attempting to start HealthSyncService");
             Intent healthIntent = new Intent(this, HealthSyncService.class);
             healthIntent.setAction(HealthSyncService.ACTION_START);
             ContextCompat.startForegroundService(this, healthIntent);
+            Log.i(TAG, "[DIAGNOSTIC][MAIN][SUCCESS] HealthSyncService started from MainActivity");
         } catch (Exception e) {
             Log.e(TAG, "Failed to start HealthSyncService", e);
+            Log.e(TAG, "[DIAGNOSTIC][MAIN][ERROR] Failed to start HealthSyncService: " + e.getMessage());
         }
     }
 

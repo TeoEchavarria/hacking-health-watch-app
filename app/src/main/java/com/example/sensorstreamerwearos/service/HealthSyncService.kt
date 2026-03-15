@@ -106,23 +106,28 @@ class HealthSyncService : LifecycleService(),
     private fun startSync() {
         if (isRunning) {
             Log.d(TAG, "Already running, skipping start")
+            Log.w(TAG, "[DIAGNOSTIC] HealthSyncService already running - sync should be active")
             return
         }
         
         Log.i(TAG, "=== STARTING HEALTH SYNC ===")
+        Log.i(TAG, "[DIAGNOSTIC][SERVICE][STARTING] HealthSyncService initializing")
         isRunning = true
         
         createNotificationChannel()
         startForegroundWithNotification()
         
         // Start health sync manager
+        Log.i(TAG, "[DIAGNOSTIC][SERVICE][STARTING] Calling healthSyncManager.start()")
         healthSyncManager?.start()
+        Log.i(TAG, "[DIAGNOSTIC][SERVICE][STARTED] HealthSyncManager started")
         
         // Set connection to verifying and send ping
         ConnectionManager.setVerifying()
         sendPing()
         
         Log.i(TAG, "=== HEALTH SYNC STARTED ===")
+        Log.i(TAG, "[DIAGNOSTIC][SERVICE][STARTED] isRunning=$isRunning, periodic sync should execute every 15min")
     }
 
     private fun stopSync() {
