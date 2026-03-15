@@ -142,6 +142,12 @@ class HealthSyncManager(
     private fun startPeriodicSync() {
         syncJob = scope.launch {
             Log.i(TAG, "[DIAGNOSTIC][SYNC_JOB] Periodic sync job coroutine started")
+            
+            // Initial delay to allow passive monitoring callbacks to populate cached values
+            Log.i(TAG, "[DIAGNOSTIC][SYNC_JOB] Waiting 60s before first sync to allow passive monitoring callbacks")
+            delay(60_000L) // 60 seconds
+            Log.i(TAG, "[DIAGNOSTIC][SYNC_JOB] Initial delay complete, starting periodic sync")
+            
             var syncCount = 0
             while (isActive && isRunning) {
                 try {
@@ -178,6 +184,13 @@ class HealthSyncManager(
         
         // Log detailed metrics before sending
         Log.i(TAG, "DAILY_SUMMARY built: date=${summary.date}, steps=${summary.steps}, sleepMinutes=${summary.sleepMinutes}, hr_samples=${summary.heartRateSamples.size}, avgHR=${summary.avgHeartRate}")
+        
+        // Forensic pre-send confirmation logs (summary ready)
+        Log.i(TAG, "[STEPS][WATCH][SUMMARY_READY] value=${summary.steps}, date=${summary.date}")
+        if (summary.sleepMinutes != null) {
+            Log.i(TAG, "[SLEEP][WATCH][SUMMARY_READY] value=${summary.sleepMinutes}min, date=${summary.date}")
+        }
+        Log.i(TAG, "[HEART_RATE][WATCH][SUMMARY_READY] sample_count=${summary.heartRateSamples.size}, date=${summary.date}")
         
         // Forensic per-metric serialization logs
         Log.i(TAG, "[STEPS][WATCH][SERIALIZED] date=${summary.date}, value=${summary.steps}")
