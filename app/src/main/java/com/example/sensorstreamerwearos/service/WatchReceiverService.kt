@@ -59,6 +59,42 @@ class WatchReceiverService : WearableListenerService() {
                 ConnectionManager.setVerified()
                 ensureHealthSyncRunning()
             }
+            Protocol.PATH_HEALTH_MEASURE_REQUEST -> {
+                val payload = String(messageEvent.data)
+                Log.d(TAG, "💓 On-demand measurement request received: $payload")
+                handleMeasurementRequest(nodeId, payload)
+            }
+        }
+    }
+    
+    /**
+     * Handle on-demand measurement request from phone.
+     * Triggers immediate health data collection and sync.
+     */
+    private fun handleMeasurementRequest(nodeId: String, payload: String) {
+        scope.launch {
+            try {
+                Log.i(TAG, "[MEASURE_REQUEST] Triggering immediate health data sync")
+                
+                // Trigger immediate health sync
+                val intent = Intent(this@WatchReceiverService, HealthSyncService::class.java).apply {
+                    action = HealthSyncService.ACTION_FORCE_SYNC
+                }
+                androidx.core.content.ContextCompat.startForegroundService(this@WatchReceiverService, intent)
+                
+                // Send acknowledgment to phone
+                val messageClient = Wearable.getMessageClient(this@WatchReceiverService)
+                messageClient.sendMessage(
+                    nodeId,
+                    Protocol.PATH_HEALTH_MEASURE_ACK,
+                    "Measurement started".toByteArray()
+                ).await()
+                
+                Log.i(TAG, "[MEASURE_REQUEST] ✅ Immediate sync triggered and ACK sent")
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "[MEASURE_REQUEST] ❌ Failed to handle measurement request", e)
+            }
         }
     }
     

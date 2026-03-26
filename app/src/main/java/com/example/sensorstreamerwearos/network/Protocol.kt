@@ -10,6 +10,10 @@ object Protocol {
     const val PATH_HEALTH_DAILY = "/health/daily"     // ACTIVE: Daily summary every 15 min
     const val PATH_HEALTH_HR = "/health/hr"           // ACTIVE: HR batches when 5+ samples
     
+    // On-Demand Measurement Requests (Phone → Watch)
+    const val PATH_HEALTH_MEASURE_REQUEST = "/health/measure_request"  // Request immediate health data collection
+    const val PATH_HEALTH_MEASURE_ACK = "/health/measure_ack"         // Watch acknowledgment
+    
     // DEPRECATED: Unused paths - all metrics sent via PATH_HEALTH_DAILY
     @Deprecated("Not used - sleep data included in PATH_HEALTH_DAILY", ReplaceWith("PATH_HEALTH_DAILY"))
     const val PATH_HEALTH_SLEEP = "/health/sleep"
