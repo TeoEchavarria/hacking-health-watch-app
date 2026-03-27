@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Heart icon - Sense -->
+    <path
+        android:fillColor="#6FA897"
+        android:pathData="M54,79 C54,79 28,60 28,45 C28,38 33,33 39,33 C44,33 49,36 54,41 C59,36 64,33 69,33 C75,33 80,38 80,45 C80,60 54,79 54,79 Z" />
+</vector>
