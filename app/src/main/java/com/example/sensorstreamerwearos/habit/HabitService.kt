@@ -7,9 +7,6 @@ import android.app.PendingIntent
 import android.app.TaskStackBuilder
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
-import android.media.MediaPlayer
-import android.media.RingtoneManager
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -68,7 +65,6 @@ class HabitService : LifecycleService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var timerJob: Job? = null
 
-    private var mediaPlayer: MediaPlayer? = null
     private var currentLogId: String? = null
 
     private var habitId: String = ""
@@ -129,7 +125,6 @@ class HabitService : LifecycleService() {
         retryCount = 0
         startForeground(NOTIFICATION_ID, createNotificationBuilder(title).build())
         vibrateReminderAppear()
-        startAlarmSound()
         val log = HabitReminderLogStore.createLog(habitId, title)
         currentLogId = log.logId
         serviceScope.launch {
@@ -179,7 +174,6 @@ class HabitService : LifecycleService() {
 
     private fun handleTimerFinished() {
         timerJob?.cancel()
-        stopAlarmSound()
         stopVibration()
         updateLogAndSyncToPhone(HabitReminderLog.Status.POSTPONED)
         _uiState.value = _uiState.value.copy(isActive = false)
@@ -222,7 +216,6 @@ class HabitService : LifecycleService() {
         habitId = intent.getStringExtra(EXTRA_HABIT_ID) ?: habitId
         sourceNodeId = intent.getStringExtra(EXTRA_SOURCE_NODE_ID) ?: sourceNodeId
         timerJob?.cancel()
-        stopAlarmSound()
         stopVibration()
         updateLogAndSyncToPhone(HabitReminderLog.Status.DONE)
         _uiState.value = _uiState.value.copy(isActive = false)
@@ -236,7 +229,6 @@ class HabitService : LifecycleService() {
         habitId = intent.getStringExtra(EXTRA_HABIT_ID) ?: habitId
         sourceNodeId = intent.getStringExtra(EXTRA_SOURCE_NODE_ID) ?: sourceNodeId
         timerJob?.cancel()
-        stopAlarmSound()
         stopVibration()
         updateLogAndSyncToPhone(HabitReminderLog.Status.POSTPONED)
         _uiState.value = _uiState.value.copy(isActive = false)
@@ -265,63 +257,6 @@ class HabitService : LifecycleService() {
                     }
                 }
             }
-        }
-    }
-
-    private fun startAlarmSound() {
-        try {
-            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-            if (uri == null) {
-                Log.w(TAG, "No alarm/ringtone URI available, skipping sound")
-                return
-            }
-            val mp = MediaPlayer().apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build()
-                )
-                setDataSource(applicationContext, uri)
-                isLooping = true // Loop alarm sound
-                setOnCompletionListener {
-                    // Won't be called if looping, but good practice
-                    stopAlarmSound()
-                }
-                setOnErrorListener { _, what, extra ->
-                    Log.e(TAG, "MediaPlayer error what=$what extra=$extra")
-                    stopAlarmSound()
-                    true
-                }
-                prepareAsync()
-                setOnPreparedListener {
-                    if (mediaPlayer == this) {
-                        start()
-                        Log.i(TAG, "Alarm sound started")
-                    } else {
-                        release()
-                    }
-                }
-            }
-            mediaPlayer = mp
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start alarm sound", e)
-        }
-    }
-
-    private fun stopAlarmSound() {
-        try {
-            mediaPlayer?.let { mp ->
-                if (mp.isPlaying) {
-                    mp.stop()
-                    Log.i(TAG, "Alarm sound stopped")
-                }
-                mp.release()
-            }
-            mediaPlayer = null
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping alarm sound", e)
         }
     }
 
@@ -429,10 +364,10 @@ class HabitService : LifecycleService() {
     private fun vibrateReminderAppear() {
         getVibrator()?.let { v ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && v.hasVibrator()) {
-                // Stronger vibration pattern: 0ms delay, 500ms on, 200ms off, 500ms on
-                // Repeat index 0 (loop from beginning)
-                v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 500, 200, 500), 0))
-                Log.i(TAG, "Vibrate triggered (looping) for habitId=$habitId")
+                // Single vibration pattern: 0ms delay, 500ms on, 200ms off, 500ms on
+                // -1 means no repeat (single vibration)
+                v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 500, 200, 500), -1))
+                Log.i(TAG, "Vibrate triggered (single) for habitId=$habitId")
             }
         }
     }
@@ -459,7 +394,6 @@ class HabitService : LifecycleService() {
 
     override fun onDestroy() {
         timerJob?.cancel()
-        stopAlarmSound()
         stopVibration()
         serviceScope.cancel()
         super.onDestroy()
