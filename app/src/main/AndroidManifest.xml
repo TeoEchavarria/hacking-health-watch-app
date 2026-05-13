@@ -139,11 +139,6 @@
             </intent-filter>
         </receiver>
 
-        <service
-            android:name=".service.HeartRateForegroundService"
-            android:exported="false"
-            android:foregroundServiceType="health" />
-
         <activity
             android:name="com.example.sensorstreamerwearos.MainActivity"
             android:exported="true"

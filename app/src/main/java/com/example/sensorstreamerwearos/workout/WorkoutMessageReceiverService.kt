@@ -30,7 +30,8 @@ import com.example.sensorstreamerwearos.workout.ui.WorkoutTimerActivity
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
-import com.google.gson.Gson
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.decodeFromString
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,7 +40,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
 
 /**
  * Service that receives workout routine messages from the phone app.
@@ -422,7 +422,7 @@ class WorkoutMessageReceiverService : WearableListenerService() {
     private fun handleWorkoutPush(messageEvent: MessageEvent) {
         try {
             val jsonPayload = String(messageEvent.data, Charsets.UTF_8)
-            val routine = Gson().fromJson(jsonPayload, Routine::class.java)
+            val routine = Json.decodeFromString<Routine>(jsonPayload)
             serviceScope.launch {
                 WorkoutDataStoreProvider.getDataStore(applicationContext).edit { prefs ->
                     prefs[WorkoutDataStoreProvider.PENDING_ROUTINE_KEY] = jsonPayload
@@ -491,7 +491,7 @@ class WorkoutMessageReceiverService : WearableListenerService() {
         try {
             val prefs = WorkoutDataStoreProvider.getDataStore(context).data.first()
             val jsonStr = prefs[WorkoutDataStoreProvider.PENDING_ROUTINE_KEY]
-            jsonStr?.let { Gson().fromJson(it, Routine::class.java) }
+            jsonStr?.let { Json.decodeFromString<Routine>(it) }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load pending routine", e)
             null

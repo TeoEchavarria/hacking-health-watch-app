@@ -1,6 +1,7 @@
 package com.example.sensorstreamerwearos.workout.model
 
-import com.google.gson.annotations.SerializedName
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 /**
  * Workout routine model shared between phone and watch apps.
@@ -8,35 +9,38 @@ import com.google.gson.annotations.SerializedName
  * Deserialized from JSON received via Wearable Data Layer MessageClient.
  * Path: "/workout/push"
  */
+@Serializable
 data class Routine(
-    @SerializedName("routineId")
+    @SerialName("routineId")
     val routineId: String,
     
-    @SerializedName("startAt")
+    @SerialName("startAt")
     val startAt: String, // ISO 8601 timestamp
     
-    @SerializedName("segments")
+    @SerialName("segments")
     val segments: List<Segment>
 )
 
 /**
  * Individual workout segment (WORK or REST).
  */
+@Serializable
 data class Segment(
-    @SerializedName("type")
+    @SerialName("type")
     val type: SegmentType,
     
-    @SerializedName("label")
+    @SerialName("label")
     val label: String,
     
-    @SerializedName("durationSec")
+    @SerialName("durationSec")
     val durationSec: Int
 )
 
+@Serializable
 enum class SegmentType {
-    @SerializedName("WORK")
+    @SerialName("WORK")
     WORK,
     
-    @SerializedName("REST")
+    @SerialName("REST")
     REST
 }

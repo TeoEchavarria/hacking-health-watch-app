@@ -14,12 +14,6 @@ object Protocol {
     const val PATH_HEALTH_MEASURE_REQUEST = "/health/measure_request"  // Request immediate health data collection
     const val PATH_HEALTH_MEASURE_ACK = "/health/measure_ack"         // Watch acknowledgment
     
-    // DEPRECATED: Unused paths - all metrics sent via PATH_HEALTH_DAILY
-    @Deprecated("Not used - sleep data included in PATH_HEALTH_DAILY", ReplaceWith("PATH_HEALTH_DAILY"))
-    const val PATH_HEALTH_SLEEP = "/health/sleep"
-    @Deprecated("Not used - steps data included in PATH_HEALTH_DAILY", ReplaceWith("PATH_HEALTH_DAILY"))
-    const val PATH_HEALTH_STEPS = "/health/steps"
-
     // Data API Paths (State Sync)
     const val PATH_WATCH_STATE = "/state/watch"
     const val PATH_PHONE_STATE = "/state/phone"

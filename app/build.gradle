@@ -141,13 +141,6 @@ dependencies {
     // Wear Ongoing Activity
     implementation "androidx.wear:wear-ongoing:1.0.0"
     
-    // Gson for JSON parsing
-    implementation "com.google.code.gson:gson:2.11.0"
-    
-    // TensorFlow Lite for rep detection
-    implementation "org.tensorflow:tensorflow-lite:2.14.0"
-    implementation "org.tensorflow:tensorflow-lite-support:0.4.4"
-    
     // Testing - Instrumented Tests
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test:runner:1.5.2'
